@@ -3,7 +3,7 @@ import torch.nn as nn
 
 import math
 
-from advance.basics.swish import Swish
+# https://github.com/xuebinqin/U-2-Net
 
 
 __all__ = ['U2NET_full', 'U2NET_lite']

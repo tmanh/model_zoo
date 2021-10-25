@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as functional
 
 
 class ConvGRU2d(nn.Module):
@@ -73,13 +72,23 @@ class DeformableLightGRU2d(nn.Module):
         if h is None:
             h = torch.zeros((x.shape[0], self.out_channels, x.shape[2], x.shape[3]), dtype=x.dtype, device=x.device)
 
+        _, _, height, width = x.shape
         combined = torch.cat([x, h], dim=1)
         combined_conv = self.conv_gates(combined)
 
         r = torch.sigmoid(combined_conv[:, :1])
         z = torch.sigmoid(combined_conv[:, 1:2])
 
-        shifted_h = self.interpolate(h, combined_conv[:, 2:])
+        sampling_maps = combined_conv[:, 2:].permute(0, 2, 3, 1)
+
+        # shifted_h = self.interpolate(h, combined_conv[:, 2:])
+        h_pos, w_pos = torch.meshgrid(torch.arange(start=0, end=height, device=x.device), torch.arange(start=0, end=width, device=x.device))
+        h_pos = h_pos / (height / 2) - 1
+        h_pos = h_pos / (width / 2) - 1
+        base_sampling = torch.cat([w_pos.view(1, height, width, 1), h_pos.view(1, height, width, 1)], dim=3)
+        sampling_maps += base_sampling
+        shifted_h = nn.functional.grid_sample(h, sampling_maps, mode='bilinear', padding_mode='zeros', align_corners=True)
+        
         combined = torch.cat([x, r * shifted_h], dim=1)
         n = self.act(self.conv_can(combined))
 

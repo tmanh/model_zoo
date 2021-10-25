@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as functional
 
-from advance.basics.dynamic_conv import GatingConv2d
 from advance.basics.conv_gru import ConvGRU2d, LightGRU2d, DeformableLightGRU2d
 
 
@@ -120,7 +119,7 @@ class GRUUNet(BaseGRUUNet):
             x = torch.cat((x0, x1), dim=1)
             del x0, x1
             for mod in dec:
-                if isinstance(mod, self.dec_gru_conv):
+                if isinstance(mod, (self.dec_gru_conv, self.last_conv)):
                     x = mod(x, hs[hidx])
                     hs[hidx] = x
                     hidx += 1
@@ -165,7 +164,7 @@ class MemorySavingGRUUNet(BaseGRUUNet):
         cin = self.enc_channels[-1] + self.enc_channels[-2]
         decs = []
         for idx, cout in enumerate(self.dec_channels):
-            decs.append(self._dec(cin, cout, n_convs=self.n_dec_convs, gru_all=self.gru_all))
+            decs.append(self._dec(cin, cout, n_convs=self.n_dec_convs, gru_all=self.gru_all, last=(idx==len(self.dec_channels)-1)))
             cin = cout + self.enc_channels[max(-idx - 3, -len(self.enc_channels))]
         self.decs = nn.ModuleList(decs)
 
@@ -191,7 +190,7 @@ class MemorySavingGRUUNet(BaseGRUUNet):
             x = torch.cat((x0, x1), dim=1)
             del x0, x1
             for mod in dec:
-                if isinstance(mod, self.dec_gru_conv):
+                if isinstance(mod, (self.dec_gru_conv, self.last_conv)):
                     x = mod(x, hs[hidx])
                     hs[hidx] = x
                     hidx += 1
@@ -265,7 +264,7 @@ class ResidualGRUUNet(BaseGRUUNet):
             x = torch.cat((x0, x1), dim=1)
             del x0, x1
             for mod in dec:
-                if isinstance(mod, self.dec_gru_conv):
+                if isinstance(mod, (self.dec_gru_conv, self.last_conv)):
                     x = mod(x, hs[hidx])
                     hs[hidx] = x
                     hidx += 1
