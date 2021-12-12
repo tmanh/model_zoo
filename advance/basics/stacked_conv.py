@@ -1,7 +1,7 @@
 import torch.nn as nn
 
 from copy import deepcopy
-from .ConvDropout import ConvDropoutNormNonlin
+from .conv_dropout import ConvDropoutNormNonlin
 
 
 class StackedConvLayers(nn.Module):

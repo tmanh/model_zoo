@@ -46,12 +46,14 @@ class LightGRU2d(nn.Module):
 
         combined = torch.cat([x, h], dim=1)
         combined_conv = torch.sigmoid(self.conv_gates(combined))
+        del combined
 
         r = combined_conv[:, :1]
         z = combined_conv[:, 1:]
 
         combined = torch.cat([x, r * h], dim=1)
         n = self.act(self.conv_can(combined))
+        del combined
 
         return z * h + (1 - z) * n
 

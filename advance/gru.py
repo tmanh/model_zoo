@@ -172,7 +172,7 @@ class MemorySavingGRUUNet(BaseGRUUNet):
         hidx = 0
         feats = [x]
         for enc in self.encoders:
-            for _, mod in enumerate(enc):
+            for mod in enc:
                 if isinstance(mod, self.enc_gru_conv):
                     x = mod(x, hs[hidx])
                     hs[hidx] = x
