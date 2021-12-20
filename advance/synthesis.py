@@ -1,1 +1,1 @@
-from .maprnn import MappingRNN
+from .maprnn import *
