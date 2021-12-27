@@ -5,7 +5,7 @@ import torch.nn as nn
 from .basics.padding import same_padding
 from .basics.geometry import tensor_warping
 from .basics.activation import stable_softmax
-from .basics.dynamic_conv import Deconv, DynamicConv2d
+from .basics.dynamic_conv import Deconv, DynamicConv2d, UpConv
 from .depth_volumes import DepthVolumeModel, BaseDepthVolumeModel
 
 
@@ -33,7 +33,12 @@ class VisibilityModel(BaseDepthVolumeModel):
 
     def forward(self, src_images, ys_dst, xs_dst, ys_src, xs_src, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
         n_samples, n_views, n_channels, height, width = src_images.shape
+        
+        old_ys_dst, old_xs_dst, old_ys_src, old_xs_src = ys_dst.detach().clone(), xs_dst.detach().clone(), ys_src.detach().clone(), xs_src.detach().clone()
+        old_dst_intrinsics, old_src_intrinsics = dst_intrinsics.detach().clone(), src_intrinsics.detach().clone()
         depth_probs, src_weights = self.depth_volume_model(src_images, ys_dst, xs_dst, ys_src, xs_src, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics)
+        ys_dst, xs_dst, ys_src, xs_src = old_ys_dst, old_xs_dst, old_ys_src, old_xs_src
+        dst_intrinsics, src_intrinsics = old_dst_intrinsics, old_src_intrinsics
 
         # ======== src weights ============
         if src_weights.shape[-1] != src_images.shape[-1]:
@@ -47,7 +52,7 @@ class VisibilityModel(BaseDepthVolumeModel):
             depth_probs_full_size = nn.functional.interpolate(depth_probs, size=(src_images.shape[-1], src_images.shape[-2]))
         else:
             depth_probs_full_size = depth_probs
-        depth_prob_volume_softmax = stable_softmax(depth_probs_full_size, dim=0)
+        depth_prob_volume_softmax = stable_softmax(depth_probs_full_size, dim=1)
 
         # =============================== warp images =========================================
         sampling_maps, src_masks = self.compute_sampling_maps(n_samples, n_views, ys_dst, xs_dst, ys_src, xs_src, height, width, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics)
@@ -66,7 +71,7 @@ class VisibilityModel(BaseDepthVolumeModel):
         # =============== Compute aggregated images =====================================
         weighted_src_img = torch.sum(src_weights_softmax.view(n_samples, n_views, self.depth_num, 1, height, width) * warped_imgs_srcs, dim=1) # [D, B, H, W, 3]
         aggregated_img = torch.sum(weighted_src_img * depth_prob_volume_softmax, dim=1)
-        warped_imgs_srcs = torch.sum(warped_imgs_srcs * depth_prob_volume_softmax.view(n_samples, 1, self.depth_num, 1, height, width), dim=1)
+        warped_imgs_srcs = torch.sum(warped_imgs_srcs * depth_prob_volume_softmax.view(n_samples, 1, self.depth_num, 1, height, width), dim=2)
 
         # ======== generator =================================
         output_imgs = []
@@ -81,7 +86,7 @@ class VisibilityModel(BaseDepthVolumeModel):
         img_confidences_norm = img_confidences / (torch.sum(img_confidences, dim=1, keepdims=True) + 1e-7)
         final_output_img = torch.sum(outputs_imgs * img_confidences_norm, dim=1)
 
-        return aggregated_img, final_output_img, warped_imgs_srcs
+        return aggregated_img, final_output_img, warped_imgs_srcs, outputs_imgs
 
 
 class RefinementNetwork(nn.Module):
@@ -90,44 +95,40 @@ class RefinementNetwork(nn.Module):
 
         layer_specs = [n_channels * 2, n_channels * 4, n_channels * 8, n_channels * 8, n_channels * 8]
 
-        self.layers_x = self.generate_layers(n_channels, layer_specs)
-        self.layers_y = self.generate_layers(n_channels, layer_specs)
-        self.layers_c = self.generate_confidence_layers([n_channels * 2, *[x * 2 for x in layer_specs]])
-        self.layers_d = self.generate_decoders(n_channels)
+        self.layers_i = self.generate_layers(n_channels, layer_specs, act)
+        self.layers_c = self.generate_confidence_layers([n_channels * 2, *[x * 2 for x in layer_specs]], act)
+        self.layers_d = self.generate_decoders(n_channels, act)
 
-        self.deconv_color = Deconv(in_channels=n_channels, out_channels=3, kernel_size=4, stride=2)
+        self.deconv_color = Deconv(in_channels=n_channels, out_channels=3, kernel_size=4, stride=2, act=act)
         self.deconv_confidence = Deconv(in_channels=n_channels, out_channels=1, kernel_size=4, stride=2)
 
         self.act = act
     
     @staticmethod
-    def generate_confidence_layers(layer_specs):
-        return [
+    def generate_confidence_layers(layer_specs, act):
+        return nn.ModuleList([
             nn.Sequential(
                 *[
-                    DynamicConv2d(out_channels, out_channels // 2),
-                    DynamicConv2d(out_channels // 2, 1, act=nn.Sigmoid()),
+                    DynamicConv2d(out_channels, out_channels // 2, batch_norm=False, act=act),
+                    DynamicConv2d(out_channels // 2, 1, batch_norm=False, act=nn.Sigmoid()),
                 ]
             )
             for out_channels in layer_specs
-        ]
+        ])
 
     @staticmethod
-    def generate_layers(n_channels, layer_specs):
-        layers = [DynamicConv2d(3, n_channels, kernel_size=4, stride=2, batch_norm=False, act=nn.LeakyReLU(0.2, inplace=True),)]
+    def generate_layers(n_channels, layer_specs, act):
+        layers = [DynamicConv2d(3, n_channels, kernel_size=4, stride=2, batch_norm=False, act=act,)]
 
         in_channels = n_channels
-        for i, out_channels in enumerate(layer_specs):
-            if i < len(layer_specs) - 1:
-                layers.append(DynamicConv2d(in_channels, out_channels, kernel_size=4, stride=2, batch_norm=True, act=nn.LeakyReLU(0.2, inplace=True)))
-            else:
-                layers.append(DynamicConv2d(in_channels, out_channels, kernel_size=4, stride=2, batch_norm=True, act=None))
+        for out_channels in layer_specs:
+            layers.append(DynamicConv2d(in_channels, out_channels, kernel_size=4, stride=2, batch_norm=False, act=act))
             in_channels = out_channels
 
-        return layers
+        return nn.ModuleList(layers)
 
     @staticmethod
-    def generate_decoders(n_channels):
+    def generate_decoders(n_channels, act):
         decode_layer_specs = [
             (n_channels * 8, 0.5),   # decoder_6: [batch, 4, 16, ngf * 8 * 2] => [batch, 8, 32, ngf * 8 * 2]
             (n_channels * 8, 0.5),   # decoder_5: [batch, 8, 32, ngf * 8 * 2] => [batch, 16, 64, ngf * 8 * 2]
@@ -144,29 +145,25 @@ class RefinementNetwork(nn.Module):
             n_channels * 4,       # decoder_2: [batch, 64, 256, ngf * 2 * 2] => [batch, 128, 512, ngf * 2 * 2]
         ]
 
-        return [
-            Deconv(
-                input_layer_specs[i],
-                out_channels,
-                kernel_size=4,
-                stride=2,
-                batch_norm=True,
-                p_dropout=dropout,
-            )
+        return nn.ModuleList([
+            Deconv(input_layer_specs[i], out_channels, kernel_size=3, stride=1, batch_norm=False, p_dropout=dropout, act=act)
             for i, (out_channels, dropout) in enumerate(decode_layer_specs)
-        ]
+        ])
 
     def forward(self, x, y):
-        confidences = []
+        _, _, height, width = x.shape
+        list_x = []
+        for layer_i in self.layers_i:
+            x = layer_i(x)
+            list_x.append(x)
+
         merges = []
-        for layer_x, layer_y, layer_c in zip(self.layers_x, self.layers_y, self.layers_c):
-            x = layer_x(x)
-            y = layer_y(y)
+        for idx, (layer_i, layer_c) in enumerate(zip(self.layers_i, self.layers_c)):
+            x = list_x[idx]
+            y = layer_i(y)
             c = torch.cat([x, y], dim=1)
             c = layer_c(c)
             m = c * x + (1 - c) * y
-
-            confidences.append(c)
             merges.append(m)
 
         # ===========================================================
@@ -176,24 +173,18 @@ class RefinementNetwork(nn.Module):
         for i, layer_d in enumerate(self.layers_d):
             skip_layer = - i - 1
             if up_feats is None:
-                # first decoder layer doesn't have skip connections
-                # since it is directly connected to the skip_layer
                 input_tensor = merges[-1]
             else:
                 up_feats = same_padding(up_feats, merges[skip_layer])
                 input_tensor = torch.cat([up_feats, merges[skip_layer]], dim=1)
-            up_feats = layer_d(self.act(input_tensor))
+            up_feats = layer_d(input_tensor)
 
-        # retified
-        rectified = self.act(up_feats)
+        colors = self.deconv_color(up_feats)
+        colors = nn.functional.interpolate(colors, size=(height, width), mode='bilinear', align_corners=False)
 
-        # decoder to generate image
-        colors = self.deconv_color(rectified)
-        colors = torch.tanh(colors)
-
-        # decoder to generate confidence
-        confidence = self.deconv_confidence(rectified)
+        confidence = self.deconv_confidence(up_feats)
         confidence = torch.sigmoid(confidence)
+        confidence = nn.functional.interpolate(confidence, size=(height, width))
 
         return colors, confidence
 

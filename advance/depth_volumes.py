@@ -5,6 +5,7 @@ import torch.nn as nn
 
 from .snet import SNetDS2BN_base_8
 from .basics.conv_gru import ConvGRU2d
+from .basics.padding import same_padding
 from .basics.geometry import create_sampling_map_target2source, tensor_warping
 from .basics.dynamic_conv import DeconvGroupNorm, DynamicConv2d
 
@@ -46,7 +47,7 @@ class BaseDepthVolumeModel(nn.Module):
         return sampling_maps, masks
 
 class DepthVolumeModel(BaseDepthVolumeModel):
-    def __init__(self, depth_start, depth_end, depth_num):
+    def __init__(self, depth_start, depth_end, depth_num, memory_saving=True):
         super().__init__(depth_start, depth_end, depth_num)
 
         self.depth_start = depth_start
@@ -69,8 +70,28 @@ class DepthVolumeModel(BaseDepthVolumeModel):
         self.conv3 = DynamicConv2d(in_channels=11, out_channels=9, act=None, batch_norm=False)
         self.conv4 = DynamicConv2d(in_channels=4, out_channels=1, act=None, batch_norm=False)
 
+        self.memory_saving = memory_saving
+
     def forward(self, src_images, ys_dst, xs_dst, ys_src, xs_src, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
         n_samples, n_views, n_channels, height, width = src_images.shape
+        
+        old_height, old_width = 0, 0
+        if self.memory_saving:
+            old_height, old_width = height, width
+            
+            height, width = height // 2, width // 2
+            src_images = nn.functional.interpolate(src_images.view(n_samples * n_views, n_channels, old_height, old_width), size=(width, height))
+            src_images = src_images.view(n_samples, n_views, n_channels, height, width)
+            
+            ys_dst, xs_dst, ys_src, xs_src = ys_dst // 2, xs_dst // 2, ys_src // 2, xs_src // 2
+            dst_intrinsics[:, :, 0, 0] = dst_intrinsics[:, :, 0, 0] / 2  # N, V, 4, 4
+            dst_intrinsics[:, :, 1, 1] = dst_intrinsics[:, :, 1, 1] / 2  # N, V, 4, 4
+            dst_intrinsics[:, :, 0, 2] = dst_intrinsics[:, :, 0, 2] / 2  # N, V, 4, 4
+            dst_intrinsics[:, :, 1, 2] = dst_intrinsics[:, :, 1, 2] / 2  # N, V, 4, 4
+            src_intrinsics[:, :, 0, 0] = src_intrinsics[:, :, 0, 0] / 2  # N, V, 4, 4
+            src_intrinsics[:, :, 1, 1] = src_intrinsics[:, :, 1, 1] / 2  # N, V, 4, 4
+            src_intrinsics[:, :, 0, 2] = src_intrinsics[:, :, 0, 2] / 2  # N, V, 4, 4
+            src_intrinsics[:, :, 1, 2] = src_intrinsics[:, :, 1, 2] / 2  # N, V, 4, 4
 
         # extract source view features for cost aggregation, and source view weights calculation
         view_towers = []
@@ -128,11 +149,13 @@ class DepthVolumeModel(BaseDepthVolumeModel):
             feature_out2 = self.cell2(feature_out2, initial_state2)
             initial_state2 = feature_out2
             feature_out2 = self.deconv2(feature_out2)
+            feature_out2 = same_padding(feature_out2, feature_out1)
             feature_out2 = torch.cat([feature_out2, feature_out1], dim=1)
 
             feature_out3 = self.cell3(feature_out2, initial_state3)
             initial_state3 = feature_out3
             feature_out3 = self.deconv3(feature_out3)
+            feature_out3 = same_padding(feature_out3, feature_out0)
             feature_out3 = torch.cat([feature_out3, feature_out0], dim=1)
             feature_out3 = self.conv3(feature_out3)
                 
@@ -156,6 +179,13 @@ class DepthVolumeModel(BaseDepthVolumeModel):
 
         src_weights = torch.stack(src_weights, dim=0).permute(1, 2, 0, 3, 4)  # [N, V, D, H, W]
         depth_probs = torch.stack(depth_probs, dim=1)  # [N, D, 1, H, W]
+
+        if self.memory_saving:
+            src_weights = nn.functional.interpolate(src_weights.reshape(n_samples * n_views, -1, height, width), size=(old_width, old_height))
+            src_weights = src_weights.view(n_samples, n_views, -1, old_height, old_width)
+
+            depth_probs = nn.functional.interpolate(depth_probs.reshape(n_samples * self.depth_num, -1, height, width), size=(old_width, old_height))
+            depth_probs = depth_probs.view(n_samples, self.depth_num, -1, old_height, old_width)
 
         return depth_probs, src_weights
 

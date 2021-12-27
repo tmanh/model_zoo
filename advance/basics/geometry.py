@@ -4,10 +4,10 @@ import torch
 import torch.nn.functional as functional
 
 
-def create_loc_matrix(depth_value, y_start, x_start, height, width):
-    y = torch.arange(start=int(y_start), end=int(height+y_start)).view(1, height, 1).repeat(1, 1, width)       # columns
-    x = torch.arange(start=int(x_start), end=int(width+x_start)).view(1, 1, width).repeat(1, height, 1)        # rows
-    ones = torch.ones((1, height, width))
+def create_loc_matrix(depth_value, y_start, x_start, height, width, device):
+    y = torch.arange(start=int(y_start), end=int(height+y_start), device=device).view(1, height, 1).repeat(1, 1, width)       # columns
+    x = torch.arange(start=int(x_start), end=int(width+x_start), device=device).view(1, 1, width).repeat(1, height, 1)        # rows
+    ones = torch.ones((1, height, width), device=device)
     z = depth_value * ones
 
     return torch.cat([x * z, y * z, z, ones], dim=0).view((4, -1))
@@ -15,7 +15,7 @@ def create_loc_matrix(depth_value, y_start, x_start, height, width):
 
 def create_sampling_map_target2source(depth_value, y_dst, x_dst, y_src, x_src, height, width, dst_intrinsic, dst_extrinsic, src_intrinsic, src_extrinsic):
     # compute location matrix
-    pos_matrix = create_loc_matrix(depth_value, y_dst, x_dst, height, width).reshape(4, -1)
+    pos_matrix = create_loc_matrix(depth_value, y_dst, x_dst, height, width, dst_intrinsic.device).reshape(4, -1)
     pos_matrix = torch.linalg.inv((dst_intrinsic @ dst_extrinsic)) @ pos_matrix
     pos_matrix = src_intrinsic @ src_extrinsic @ pos_matrix
     pos_matrix = pos_matrix.reshape((4, height, width))

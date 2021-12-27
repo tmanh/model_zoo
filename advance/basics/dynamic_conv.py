@@ -54,6 +54,34 @@ class DynamicConv2d(nn.Module):
         return x
 
 
+class UpConv(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, act=None, batch_norm=False, p_dropout=0.0):
+        super().__init__()
+
+        # deconvolution
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=kernel_size // 2)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size, stride=stride, padding=kernel_size // 2)
+        self.bn = nn.BatchNorm2d(out_channels) if batch_norm else None
+        self.dropout = nn.Dropout2d(p=p_dropout) if p_dropout > 0 else None
+
+        # activation
+        self.act = act
+
+    def forward(self, x):
+        x = self.conv1(x)
+        if self.act is not None:
+            x = self.act(x)
+
+        x = nn.functional.interpolate(x, scale_factor=2, mode='nearest')
+        
+        x = self.conv2(x)
+        if self.bn is not None:
+            x = self.bn(x)
+        if self.act is not None:
+            x = self.act(x)
+        return x
+
+
 class Deconv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride, act=None, batch_norm=False, p_dropout=0.0):
         super().__init__()
@@ -61,7 +89,6 @@ class Deconv(nn.Module):
         # deconvolution
         self.deconv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride=stride, padding=round(kernel_size / 2 - 1))
         self.bn = nn.BatchNorm2d(out_channels) if batch_norm else None
-
         self.dropout = nn.Dropout2d(p=p_dropout) if p_dropout > 0 else None
 
         # activation
@@ -69,6 +96,8 @@ class Deconv(nn.Module):
 
     def forward(self, x):
         x = self.deconv(x)
+        if self.bn is not None:
+            x = self.bn(x)
         if self.act is not None:
             x = self.act(x)
         return x
