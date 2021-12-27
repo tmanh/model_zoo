@@ -5,7 +5,7 @@ import torch.nn as nn
 from .basics.padding import same_padding
 from .basics.geometry import tensor_warping
 from .basics.activation import stable_softmax
-from .basics.dynamic_conv import Deconv, DynamicConv2d, UpConv
+from .basics.dynamic_conv import Deconv, DynamicConv2d
 from .depth_volumes import DepthVolumeModel, BaseDepthVolumeModel
 
 
@@ -32,7 +32,7 @@ class VisibilityModel(BaseDepthVolumeModel):
         return warped_imgs_srcs
 
     def forward(self, src_images, ys_dst, xs_dst, ys_src, xs_src, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
-        n_samples, n_views, n_channels, height, width = src_images.shape
+        n_samples, n_views, _, height, width = src_images.shape
         
         old_ys_dst, old_xs_dst, old_ys_src, old_xs_src = ys_dst.detach().clone(), xs_dst.detach().clone(), ys_src.detach().clone(), xs_src.detach().clone()
         old_dst_intrinsics, old_src_intrinsics = dst_intrinsics.detach().clone(), src_intrinsics.detach().clone()
