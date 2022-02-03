@@ -141,7 +141,7 @@ class EfficientNet(nn.Module):
         >>> outputs = model(inputs)
     """
 
-    def __init__(self, blocks_args=None, global_params=None):
+    def __init__(self, blocks_args=None, global_params=None, in_channels=3, freeze=True):
         super().__init__()
         assert isinstance(blocks_args, list), 'blocks_args should be a list'
         assert len(blocks_args) > 0, 'block args must be greater than 0'
@@ -152,10 +152,7 @@ class EfficientNet(nn.Module):
         bn_mom = 1 - self._global_params.batch_norm_momentum
         bn_eps = self._global_params.batch_norm_epsilon
 
-        # Get stem static or dynamic convolution depending on image size
-
         # Stem
-        in_channels = 3  # rgb
         out_channels = round_filters(32, self._global_params)  # number of output channels
         self._conv_stem = SamePaddingConv2d(in_channels, out_channels, kernel_size=3, stride=2, bias=False)
         self._bn0 = nn.BatchNorm2d(num_features=out_channels, momentum=bn_mom, eps=bn_eps)
@@ -194,6 +191,19 @@ class EfficientNet(nn.Module):
 
         # set activation to memory efficient swish by default
         self._swish = MemoryEfficientSwish()
+
+        if freeze:
+            for param in self.parameters():
+                param.requires_grad = False
+
+            for module in self.modules():
+                if isinstance(module, nn.BatchNorm2d):
+                    if hasattr(module, 'weight'):
+                        module.weight.requires_grad_(False)
+                    if hasattr(module, 'bias'):
+                        module.bias.requires_grad_(False)
+                    module.momentum = 0
+                    module.eval()
 
     def set_swish(self, memory_efficient=True):
         """Sets swish function as memory efficient (for training) or standard (for export).
@@ -377,3 +387,6 @@ class EfficientNet(nn.Module):
         if in_channels != 3:
             out_channels = round_filters(32, self._global_params)
             self._conv_stem = SamePaddingConv2d(in_channels, out_channels, kernel_size=3, stride=2, bias=False)
+
+            for param in self._conv_stem.parameters():
+                param.requires_grad = True

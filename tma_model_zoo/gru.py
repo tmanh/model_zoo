@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as functional
 
-from advance.basics.conv_gru import ConvGRU2d, LightGRU2d, DeformableLightGRU2d
+from tma_model_zoo.basics.conv_gru import ConvGRU2d, LightGRU2d, DeformableLightGRU2d
 
 
 class BaseGRUUNet(nn.Module):
@@ -281,7 +281,7 @@ def test():
     torch.set_grad_enabled(False)
     x = torch.zeros(4, 3, 484, 648).cuda()
 
-    from advance.unet import MemorySavingUNet
+    from tma_model_zoo.unet import MemorySavingUNet
     conv = nn.Conv2d(3, 64, 3, 1, 1, bias=False).cuda()
     u2net = MemorySavingUNet(64, enc_channels=[64, 128, 256], dec_channels=[256, 128, 64], n_enc_convs=2, n_dec_convs=2).cuda()
 

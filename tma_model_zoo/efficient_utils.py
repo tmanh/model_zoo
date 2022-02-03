@@ -284,7 +284,7 @@ def get_model_params(model_name, override_params):
     
     w, d, s, p = efficientnet_params(model_name)
     # note: all models have drop connect rate = 0.2
-    blocks_args, global_params = efficientnet(width_coefficient=w, depth_coefficient=d, dropout_rate=p, image_size=s)
+    blocks_args, global_params = efficientnet(width_coefficient=w, depth_coefficient=d, dropout_rate=p)
     if override_params:
         # ValueError will be raised here if override_params has fields not included in global_params.
         global_params = global_params._replace(**override_params)

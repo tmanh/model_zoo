@@ -17,9 +17,9 @@ if sys.argv[-1] == 'publish':
 install_requires = ['torch>=1.8.1']
 
 setup(
-    name='model_zoo',
+    name='tma_model_zoo',
     version=0.1,
-    description="Model Zoo",
+    description="TMA Model Zoo",
     url='',
     license='MIT',
     packages=find_packages(),

@@ -30,7 +30,7 @@ class ResBlock(nn.Module):
 
 
 class Resnet(nn.Module):
-    def __init__(self, in_dim, n_feats, kernel_size, n_resblock, out_dim, act, tail=False):
+    def __init__(self, in_dim, n_feats, kernel_size, n_resblock, out_dim, act=nn.ReLU(inplace=True), tail=False):
         super(Resnet, self).__init__()
 
         self.head = [default_conv(in_dim, n_feats, kernel_size), act]
@@ -47,14 +47,26 @@ class Resnet(nn.Module):
 
     def forward(self, x):
         shallow = self.head(x)
-        out = self.body(shallow) + shallow
+        deep = self.body(shallow)
 
         if self.tail is not None:
-            out = self.tail(out)
+            deep = self.tail(deep)
 
-            if out.shape[1] == x.shape[1]:
-                out += x
-        return out
+        if deep.shape[1] == shallow.shape[1]:
+            deep = deep + shallow
+
+        return deep
+
+    def forward_without_head(self, shallow):
+        deep = self.body(shallow)
+
+        if self.tail is not None:
+            deep = self.tail(deep)
+
+        if deep.shape[1] == shallow.shape[1]:
+            deep = deep + shallow
+
+        return deep
 
 
 def test():

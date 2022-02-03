@@ -7,9 +7,9 @@ import torch.nn as nn
 from .utils.activations import softmax_helper
 
 from .utils.initialization import HeInitializer
-from .basics.ConvDropout import ConvDropoutNormNonlin
-from .basics.StackedConv import StackedConvLayers
-from .basics.Upsampling import Upsample
+from .basics import ConvDropoutNormNonlin
+from .basics import StackedConvLayers
+from .basics import Upsample
 
 from nnunet.network_architecture.neural_network import SegmentationNetwork
 
