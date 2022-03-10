@@ -2,7 +2,7 @@ import torch.nn as nn
 
 
 class Upsample(nn.Module):
-    def __init__(self, scale_factor=None, mode='nearest', align_corners=None):
+    def __init__(self, scale_factor=None, mode='nearest', align_corners=False):
         super().__init__()
 
         self.align_corners = align_corners

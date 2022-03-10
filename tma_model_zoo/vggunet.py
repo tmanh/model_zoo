@@ -30,6 +30,8 @@ class VGGUNet(nn.Module):
 
         vgg = get_vgg_net(net)
 
+        self.normalize = torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
         encs = []
         enc = []
         encs_channels = []
@@ -62,12 +64,26 @@ class VGGUNet(nn.Module):
     def _dec(self, channels_in, channels_out, n_convs=2):
         mods = []
         for _ in range(n_convs):
-            mods.append(nn.Conv2d(channels_in, channels_out, kernel_size=3, stride=1, padding=1, bias=False))
-            mods.append(nn.ReLU(inplace=False))
+            mods.extend(
+                (
+                    nn.Conv2d(
+                        channels_in,
+                        channels_out,
+                        kernel_size=3,
+                        stride=1,
+                        padding=1,
+                        bias=False,
+                    ),
+                    nn.ReLU(inplace=False),
+                )
+            )
+
             channels_in = channels_out
         return nn.Sequential(*mods)
 
     def forward(self, x):
+        x = self.normalize(x)
+
         feats = []
         for enc in self.encs:
             x = enc(x)

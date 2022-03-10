@@ -11,13 +11,18 @@ from .basics.dynamic_conv import DeconvGroupNorm, DynamicConv2d
 
 
 class BaseDepthVolumeModel(nn.Module):
-    def __init__(self, depth_start, depth_end, depth_num):
+    def __init__(self, depth_start, depth_end, depth_num, memory_saving=True, inv_depth=False):
         super().__init__()
 
+        self.memory_saving = memory_saving
         self.depth_start = depth_start
         self.depth_end = depth_end
         self.depth_num = depth_num
-        self.depth_ranges = np.linspace(self.depth_start, self.depth_end, self.depth_num)
+
+        if inv_depth:
+            self.depth_ranges = 1.0 / np.linspace(1 / self.depth_start, 1 / self.depth_end, self.depth_num)
+        else:
+            self.depth_ranges = np.linspace(self.depth_start, self.depth_end, self.depth_num)
 
     def compute_sampling_maps(self, n_samples, n_views, ys_dst, xs_dst, ys_src, xs_src, height, width, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
         sampling_maps = []
@@ -46,14 +51,87 @@ class BaseDepthVolumeModel(nn.Module):
 
         return sampling_maps, masks
 
-class DepthVolumeModel(BaseDepthVolumeModel):
-    def __init__(self, depth_start, depth_end, depth_num, memory_saving=True):
-        super().__init__(depth_start, depth_end, depth_num)
 
-        self.depth_start = depth_start
-        self.depth_end = depth_end
-        self.depth_num = depth_num
-        self.depth_ranges = np.linspace(self.depth_start, self.depth_end, self.depth_num)
+class DepthVolume1D(BaseDepthVolumeModel):
+    def __init__(self, depth_start, depth_end, depth_num, memory_saving=False, n_feats=32):
+        super().__init__(depth_start, depth_end, depth_num, memory_saving)
+
+        self.n_feats = n_feats
+
+        self.cell0 = ConvGRU2d(in_channels=self.n_feats * 3, out_channels=self.n_feats, kernel_size=1, padding=0)
+        self.cell1 = ConvGRU2d(in_channels=self.n_feats - 1, out_channels=self.n_feats // 4, kernel_size=1, padding=0)
+
+        self.conv1 = DynamicConv2d(in_channels=self.n_feats // 4, out_channels=1, act=None, batch_norm=False, kernel_size=1)
+
+    def forward(self, src_feats, ys_dst, xs_dst, ys_src, xs_src, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics, iheight, iwidth, positions=None):
+        n_samples, n_views, _, height, width = src_feats.shape
+        device = src_feats.device
+
+        # sampling_maps: [N, V, D, 2, H, W], view_masks: [N, V, D, 1, H, W]
+        sampling_maps, _ = self.compute_sampling_maps(n_samples, n_views, ys_dst, xs_dst, ys_src, xs_src, height, width, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics)
+        sampling_maps = sampling_maps.permute(0, 1, 2, 4, 5, 3)
+
+        # forward cost volume
+        src_weights = []
+        depth_probs = []
+
+        n_rays = positions.shape[1] if positions is not None else iheight * iwidth
+
+        initial_state0 = torch.zeros((n_samples * n_views, self.n_feats, 1, n_rays), device=device)
+        initial_state1 = torch.zeros((n_samples, self.n_feats // 4, 1, n_rays), device=device)
+
+        for d in range(self.depth_num):
+            feature_list = []
+            for view in range(n_views):
+                sampling_map = sampling_maps[:, view, d]
+                warped_view_feature = tensor_warping(src_feats[:, view], sampling_map)
+                
+                if positions is not None:
+                    warped_view_feature = [warped_view_feature[i, :, positions[i, :, 1], positions[i, :, 2]] for i in range(n_samples)]
+                    warped_view_feature = torch.stack(warped_view_feature, dim=0).view(n_samples, -1, 1, n_rays)
+
+                feature_list.append(warped_view_feature)
+
+            warped_feats = torch.stack(feature_list, dim=0)  # src_features: [V, N, C, H, W]
+
+            warped_means = torch.mean(warped_feats, dim=0, keepdims=True).repeat([n_views, 1, 1, 1, 1])
+            warped_vars = torch.var(warped_feats, dim=0, keepdims=True).repeat([n_views, 1, 1, 1, 1])
+
+            warped_cost = torch.cat([warped_feats.permute(1, 0, 2, 3, 4), warped_means.permute(1, 0, 2, 3, 4), warped_vars.permute(1, 0, 2, 3, 4)], dim=2)
+            warped_cost = warped_cost.view(n_samples * n_views, -1, 1, n_rays)
+
+            # ================ starts Source-view Visibility Estimation (SVE) ===================================
+            feature_out0 = self.cell0(warped_cost, initial_state0)
+            initial_state0 = feature_out0
+
+            # ================ ends Source-view Visibility Estimation (SVE) ===================================
+            # process output:
+            feature_out0 = feature_out0.view(n_samples, n_views, self.n_feats, 1, n_rays)
+            src_weight = feature_out0[:, :, 0, ...]
+
+            # The first output channel is to compute the source view visibility (ie, weight)
+            feature_out0 = torch.mean(feature_out0[:, :, 1:, ...], dim=1)
+
+            # The last eight channels are used to compute the consensus volume
+            # Correspoding to Eq.(7) in the paper
+            # ================ starts Soft Ray-Casting (SRC) ========================
+            feature_out1 = self.cell1(feature_out0, initial_state1)
+            initial_state1 = feature_out1
+            features = self.conv1(feature_out1)
+            # ================ ends Soft Ray-Casting (SRC) ==========================
+
+            src_weights.append(src_weight)
+            depth_probs.append(features)
+
+        src_weights = torch.stack(src_weights, dim=0).permute(1, 2, 0, 3, 4)  # [N, V, D, H, W]
+        depth_probs = torch.stack(depth_probs, dim=1)  # [N, D, 1, H, W]
+
+        return depth_probs, src_weights
+
+
+class DepthVolume2D(BaseDepthVolumeModel):
+    def __init__(self, depth_start, depth_end, depth_num, memory_saving=True):
+        super().__init__(depth_start, depth_end, depth_num, memory_saving)
 
         self.deconv2 = DeconvGroupNorm(4, 3, kernel_size=16, stride=2)
         self.deconv3 = DeconvGroupNorm(4, 3, kernel_size=16, stride=2)
@@ -69,8 +147,6 @@ class DepthVolumeModel(BaseDepthVolumeModel):
 
         self.conv3 = DynamicConv2d(in_channels=11, out_channels=9, act=None, batch_norm=False)
         self.conv4 = DynamicConv2d(in_channels=4, out_channels=1, act=None, batch_norm=False)
-
-        self.memory_saving = memory_saving
 
     def forward(self, src_images, ys_dst, xs_dst, ys_src, xs_src, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
         n_samples, n_views, n_channels, height, width = src_images.shape
@@ -108,7 +184,6 @@ class DepthVolumeModel(BaseDepthVolumeModel):
         # forward cost volume
         src_weights = []
         depth_probs = []
-        warped_feature_whole = []
 
         initial_state0 = torch.zeros((n_samples * n_views, 8, height, width), device=src_images.device)
         initial_state1 = torch.zeros((n_samples * n_views, 4, height // 2, width // 2), device=src_images.device)
@@ -124,7 +199,6 @@ class DepthVolumeModel(BaseDepthVolumeModel):
                 feature_list.append(warped_view_feature)
     
             src_features = torch.stack(feature_list, dim=0)  # src_features: [V, N, C, H, W]
-            warped_feature_whole.append(src_features)
 
             # compute similarity, corresponds to Eq.(5) in the paper
             # cost: [V, V, N, H, W], view_cost: [1, V, N, H, W]
@@ -191,7 +265,7 @@ class DepthVolumeModel(BaseDepthVolumeModel):
 
 
 def test():
-    depth_volume_model = DepthVolumeModel(depth_start=0.5, depth_end=10, depth_num=48)
+    depth_volume_model = DepthVolume2D(depth_start=0.5, depth_end=10, depth_num=48)
 
     src_images = torch.zeros((1, 4, 3, 200, 200))
     ys_dst = torch.from_numpy(np.array([10, 10, 10, 10])).view(1, 4)

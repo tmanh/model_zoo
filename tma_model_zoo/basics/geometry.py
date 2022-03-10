@@ -39,11 +39,11 @@ def create_sampling_map_target2source(depth_value, y_dst, x_dst, y_src, x_src, h
     return sampling_map.reshape((1, 1, 1, 2, height, width)), mask.reshape((1, 1, 1, 1, height, width))
 
 
-def tensor_warping(input_image, sampling_map):
+def tensor_warping(input_image, sampling_map, mode='bilinear'):
     return functional.grid_sample(
         input_image,
         sampling_map,
-        mode='bilinear',
+        mode=mode,
         padding_mode='zeros',
         align_corners=True,
     )

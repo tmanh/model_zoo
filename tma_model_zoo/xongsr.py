@@ -3,17 +3,17 @@ import time
 import torch
 import torch.nn as nn
 
+from tma_model_zoo.basics.dynamic_conv import SamePaddingConv2dBlock
 from tma_model_zoo.resnet import ResBlock
 
 
 class BaseNet(nn.Module):
-    def __init__(self, device, n_feats, n_resblock, conv, act):
+    def __init__(self, device, n_feats, n_resblock, act):
         super().__init__()
 
         self.device = device
         self.n_feats = n_feats
         self.n_resblock = n_resblock
-        self.conv = conv
         self.act = act
 
     def forward(self, *inputs):
@@ -22,27 +22,27 @@ class BaseNet(nn.Module):
 
 # https://arxiv.org/pdf/1808.08688.pdf
 class XongSR(BaseNet):
-    def __init__(self, device, n_feats, n_resblock, conv, act):
-        super().__init__(device, n_feats, n_resblock, conv, act)
+    def __init__(self, device, n_feats, n_resblock, act):
+        super().__init__(device, n_feats, n_resblock, act)
 
-        self.dcnn1 = [conv(1, n_feats, 3)]
-        self.dcnn1.extend([ResBlock(conv, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
-        self.dcnn1.append(conv(n_feats, 1, 3))
+        self.dcnn1 = [SamePaddingConv2dBlock(1, n_feats, 3)]
+        self.dcnn1.extend([ResBlock(SamePaddingConv2dBlock, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
+        self.dcnn1.append(SamePaddingConv2dBlock(n_feats, 1, 3))
         self.dcnn1 = nn.Sequential(*self.dcnn1)
 
-        self.dcnn2 = [conv(1, n_feats, 3)]
-        self.dcnn2.extend([ResBlock(conv, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
-        self.dcnn2.append(conv(n_feats, 1, 3))
+        self.dcnn2 = [SamePaddingConv2dBlock(1, n_feats, 3)]
+        self.dcnn2.extend([ResBlock(SamePaddingConv2dBlock, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
+        self.dcnn2.append(SamePaddingConv2dBlock(n_feats, 1, 3))
         self.dcnn2 = nn.Sequential(*self.dcnn2)
 
-        self.dcnn3 = [conv(1, n_feats, 3)]
-        self.dcnn3.extend([ResBlock(conv, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
-        self.dcnn3.append(conv(n_feats, 1, 3))
+        self.dcnn3 = [SamePaddingConv2dBlock(1, n_feats, 3)]
+        self.dcnn3.extend([ResBlock(SamePaddingConv2dBlock, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
+        self.dcnn3.append(SamePaddingConv2dBlock(n_feats, 1, 3))
         self.dcnn3 = nn.Sequential(*self.dcnn3)
 
-        self.dcnn4 = [conv(1, n_feats, 3)]
-        self.dcnn4.extend([ResBlock(conv, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
-        self.dcnn4.append(conv(n_feats, 1, 3))
+        self.dcnn4 = [SamePaddingConv2dBlock(1, n_feats, 3)]
+        self.dcnn4.extend([ResBlock(SamePaddingConv2dBlock, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
+        self.dcnn4.append(SamePaddingConv2dBlock(n_feats, 1, 3))
         self.dcnn4 = nn.Sequential(*self.dcnn4)
 
     def forward(self, depth_lr):
@@ -60,19 +60,19 @@ class XongSR(BaseNet):
 
 
 class XongMSR(BaseNet):
-    def __init__(self, device, n_feats, n_resblock, conv, act):
-        super().__init__(device, n_feats, n_resblock, conv, act)
+    def __init__(self, device, n_feats, n_resblock, act):
+        super().__init__(device, n_feats, n_resblock, act)
 
-        self.sr = XongSR(device, n_feats, n_resblock, conv, act)
+        self.sr = XongSR(device, n_feats, n_resblock, act)
 
-        dcnn_x4 = [conv(2, n_feats, 3)]
-        dcnn_x4.extend([ResBlock(conv, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
-        dcnn_x4.append(conv(n_feats, 1, 3))
+        dcnn_x4 = [SamePaddingConv2dBlock(2, n_feats, 3)]
+        dcnn_x4.extend([ResBlock(SamePaddingConv2dBlock, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
+        dcnn_x4.append(SamePaddingConv2dBlock(n_feats, 1, 3))
         dcnn_x4 = nn.Sequential(*dcnn_x4)
 
-        dcnn_x2 = [conv(1, n_feats, 3)]
-        dcnn_x2.extend([ResBlock(conv, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
-        dcnn_x2.append(conv(n_feats, 1, 3))
+        dcnn_x2 = [SamePaddingConv2dBlock(1, n_feats, 3)]
+        dcnn_x2.extend([ResBlock(SamePaddingConv2dBlock, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
+        dcnn_x2.append(SamePaddingConv2dBlock(n_feats, 1, 3))
         dcnn_x2 = nn.Sequential(*dcnn_x2)
 
         self.dcnn = nn.ModuleList([dcnn_x2, dcnn_x4])

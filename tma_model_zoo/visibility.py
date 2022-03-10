@@ -6,16 +6,16 @@ from .basics.padding import same_padding
 from .basics.geometry import tensor_warping
 from .basics.activation import stable_softmax
 from .basics.dynamic_conv import Deconv, DynamicConv2d
-from .depth_volumes import DepthVolumeModel, BaseDepthVolumeModel
+from .depth_volumes import DepthVolume2D, BaseDepthVolumeModel
 
 
-class VisibilityModel(BaseDepthVolumeModel):
+class BaseVisibility(BaseDepthVolumeModel):
     def __init__(self, depth_start, depth_end, depth_num, memory_saving=False):
         super().__init__(depth_start, depth_end, depth_num)
+
         self.memory_saving = memory_saving
 
-        self.depth_volume_model = DepthVolumeModel(depth_start=0.5, depth_end=10, depth_num=48)
-        self.refine_model = RefinementNetwork()
+        self.depth_volume_model = DepthVolume2D(depth_start=depth_start, depth_end=depth_end, depth_num=depth_num)
 
     def warp_images(self, src_images, sampling_maps, n_views):
         warped_imgs_srcs = []
@@ -29,11 +29,11 @@ class VisibilityModel(BaseDepthVolumeModel):
             src_features = torch.stack(feature_list, dim=0)  # src_features: [V, N, C, H, W]
             warped_imgs_srcs.append(src_features)
         warped_imgs_srcs = torch.stack(warped_imgs_srcs, dim=1)  # [N, D, 1, H, W]
-        return warped_imgs_srcs
+        return warped_imgs_srcs 
 
     def forward(self, src_images, ys_dst, xs_dst, ys_src, xs_src, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
         n_samples, n_views, _, height, width = src_images.shape
-        
+
         old_ys_dst, old_xs_dst, old_ys_src, old_xs_src = ys_dst.detach().clone(), xs_dst.detach().clone(), ys_src.detach().clone(), xs_src.detach().clone()
         old_dst_intrinsics, old_src_intrinsics = dst_intrinsics.detach().clone(), src_intrinsics.detach().clone()
         depth_probs, src_weights = self.depth_volume_model(src_images, ys_dst, xs_dst, ys_src, xs_src, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics)
@@ -42,14 +42,14 @@ class VisibilityModel(BaseDepthVolumeModel):
 
         # ======== src weights ============
         if src_weights.shape[-1] != src_images.shape[-1]:
-            src_weights_full_size = nn.functional.interpolate(src_weights, size=(src_images.shape[-1], src_images.shape[-2]))
+            src_weights_full_size = nn.functional.interpolate(src_weights, mode='nearest', size=(src_images.shape[-1], src_images.shape[-2]))
         else:
             src_weights_full_size = src_weights
         src_weights_softmax = stable_softmax(src_weights_full_size, dim=1)
 
         # ======== depth prob ============
         if depth_probs.shape[-1] != depth_probs.shape[-1]:
-            depth_probs_full_size = nn.functional.interpolate(depth_probs, size=(src_images.shape[-1], src_images.shape[-2]))
+            depth_probs_full_size = nn.functional.interpolate(depth_probs, mode='nearest', size=(src_images.shape[-1], src_images.shape[-2]))
         else:
             depth_probs_full_size = depth_probs
         depth_prob_volume_softmax = stable_softmax(depth_probs_full_size, dim=1)
@@ -73,20 +73,35 @@ class VisibilityModel(BaseDepthVolumeModel):
         aggregated_img = torch.sum(weighted_src_img * depth_prob_volume_softmax, dim=1)
         warped_imgs_srcs = torch.sum(warped_imgs_srcs * depth_prob_volume_softmax.view(n_samples, 1, self.depth_num, 1, height, width), dim=2)
 
-        # ======== generator =================================
-        output_imgs = []
-        self_confidences = []
-        for src_index in range(n_views):
-            out_img, confidence = self.refine_model(aggregated_img, warped_imgs_srcs[:, src_index])
-            output_imgs.append(out_img)
-            self_confidences.append(confidence)
+        return aggregated_img, warped_imgs_srcs
 
-        outputs_imgs = torch.stack(output_imgs, dim=1)
-        img_confidences = torch.stack(self_confidences, dim=1)
-        img_confidences_norm = img_confidences / (torch.sum(img_confidences, dim=1, keepdims=True) + 1e-7)
-        final_output_img = torch.sum(outputs_imgs * img_confidences_norm, dim=1)
 
-        return aggregated_img, final_output_img, warped_imgs_srcs, outputs_imgs
+class VisibilityModel(BaseVisibility):
+    def __init__(self, depth_start, depth_end, depth_num, memory_saving=False, refine=False):
+        super().__init__(depth_start, depth_end, depth_num, memory_saving=memory_saving)
+        
+        self.refine = refine
+        self.refine_model = RefinementNetwork()
+
+    def forward(self, src_images, ys_dst, xs_dst, ys_src, xs_src, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
+        n_views = src_images.shape[1]
+        aggregated_img, warped_imgs_srcs = super().forward(src_images, ys_dst, xs_dst, ys_src, xs_src,
+                                                           dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics)
+        if self.refine:
+            output_imgs = []
+            self_confidences = []
+            for src_index in range(n_views):
+                out_img, confidence = self.refine_model(aggregated_img, warped_imgs_srcs[:, src_index])
+                output_imgs.append(out_img)
+                self_confidences.append(confidence)
+
+            outputs_imgs = torch.stack(output_imgs, dim=1)
+            img_confidences = torch.stack(self_confidences, dim=1)
+            img_confidences_norm = img_confidences / (torch.sum(img_confidences, dim=1, keepdims=True) + 1e-7)
+            final_output_img = torch.sum(outputs_imgs * img_confidences_norm, dim=1)
+            return aggregated_img, final_output_img, warped_imgs_srcs, outputs_imgs
+
+        return aggregated_img, warped_imgs_srcs
 
 
 class RefinementNetwork(nn.Module):
@@ -118,7 +133,7 @@ class RefinementNetwork(nn.Module):
 
     @staticmethod
     def generate_layers(n_channels, layer_specs, act):
-        layers = [DynamicConv2d(3, n_channels, kernel_size=4, stride=2, batch_norm=False, act=act,)]
+        layers = [DynamicConv2d(3, n_channels, kernel_size=4, stride=1, batch_norm=False, act=act,)]
 
         in_channels = n_channels
         for out_channels in layer_specs:
@@ -157,6 +172,9 @@ class RefinementNetwork(nn.Module):
             x = layer_i(x)
             list_x.append(x)
 
+        # ===========================================================
+        # encoder
+        # ===========================================================
         merges = []
         for idx, (layer_i, layer_c) in enumerate(zip(self.layers_i, self.layers_c)):
             x = list_x[idx]
@@ -179,12 +197,8 @@ class RefinementNetwork(nn.Module):
                 input_tensor = torch.cat([up_feats, merges[skip_layer]], dim=1)
             up_feats = layer_d(input_tensor)
 
-        colors = self.deconv_color(up_feats)
-        colors = nn.functional.interpolate(colors, size=(height, width), mode='bilinear', align_corners=False)
-
-        confidence = self.deconv_confidence(up_feats)
-        confidence = torch.sigmoid(confidence)
-        confidence = nn.functional.interpolate(confidence, size=(height, width))
+        colors = self.deconv_color(up_feats)[..., :height, :width]
+        confidence = torch.sigmoid(self.deconv_confidence(up_feats))[..., :height, :width]
 
         return colors, confidence
 

@@ -113,8 +113,13 @@ class UnetAttentionDownBLock(nn.Module):
 
 
 class GuidedUnet(nn.Module):
-    def __init__(self, color_enc_in_channels=[3, 16, 32, 64, 128, 256], depth_enc_in_channels=[1, 16, 32, 64, 128, 256],
-                 enc_out_channels=[16, 32, 64, 128, 256, 512]):
+    def __init__(self, color_enc_in_channels = None, depth_enc_in_channels = None, enc_out_channels = None):
+        if color_enc_in_channels is None:
+            color_enc_in_channels = [3, 16, 32, 64, 128, 256]
+        if depth_enc_in_channels is None:
+            depth_enc_in_channels = [1, 16, 32, 64, 128, 256]
+        if enc_out_channels is None:
+            enc_out_channels = [16, 32, 64, 128, 256, 512]
         super().__init__()
 
         self.fusions = nn.ModuleList(*[FusionBlock(n_feats) for n_feats in enc_out_channels])
@@ -197,10 +202,16 @@ class GuidedEfficientNet(nn.Module):
         self.downs = nn.ModuleList([ConvBlock(n_feats, n_feats) for _ in enc_in_channels])
         self.ups = nn.ModuleList([ConvBlock(n_feats, n_feats, down_size=False) for _ in enc_in_channels])
 
-        self.out_net = DynamicConv2d(n_feats, 1, batch_norm=False, act=act)
+        self.n_output = 1
+        if 'u' in self.mode:
+            self.n_output = 64
+            self.min_d, self.max_d = 0.5, 15
+            self.softmax = nn.Softmax(dim=1)
+
+        self.out_net = DynamicConv2d(n_feats, self.n_output, batch_norm=False, act=act)
         self.upscale = Upsample()
 
-        if self.mode == 'efficient-rgb-m':
+        if 'efficient-rgb-m' in self.mode:
             mask_in_channels = [mask_channels, *enc_in_channels[:-1]]
             self.masks = nn.ModuleList([ConvBlock(i, o) for i, o in zip(mask_in_channels, enc_in_channels)])
             self.mask_conv = Resnet(1, n_feats, 3, n_resblocks, mask_channels, act, tail=True)
@@ -237,12 +248,12 @@ class GuidedEfficientNet(nn.Module):
         return feats[::-1]
 
     def forward(self, color, depth, mask):
-        _, _, height, width = depth.size()
+        n_samples, _, height, width = depth.size()
 
         shallow_feats = self.depth_conv(depth)
         depth_feats = self.compute_down_feats(shallow_feats)
 
-        if self.mode == 'efficient-rgb-m':
+        if 'efficient-rgb-m' in self.mode:
             guidance_feats = self.backbone(color)[::-1]
             mask_feats = self.compute_mask_feats(mask)
             guidance_feats = [guidance_feats[i] * mask_feats[i] for i in range(len(mask_feats))]
@@ -251,6 +262,11 @@ class GuidedEfficientNet(nn.Module):
 
         up_feats = shallow_feats + self.compute_upscaled_feats(depth_feats, guidance_feats, height, width)
         out = self.out_net(up_feats)
+
+        if 'u' in self.mode:
+            list_depth = torch.linspace(self.min_d, self.max_d, self.n_output, device=out.device).view(1, self.n_output, 1, 1)
+            list_depth = list_depth.repeat(n_samples, 1, height, width)
+            out = torch.sum(self.softmax(out) * list_depth, dim=1, keepdims=True)
 
         return out, up_feats
 
