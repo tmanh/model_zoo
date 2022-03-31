@@ -6,8 +6,11 @@ from tma_model_zoo.basics.conv_gru import ConvGRU2d, LightGRU2d, DeformableLight
 
 
 class BaseGRUUNet(nn.Module):
-    def __init__(self, in_channels, enc_channels=[64, 128, 256, 512], dec_channels=[256, 128, 64], n_enc_convs=3, n_dec_convs=3, gru_all=False,
-                 act=nn.ReLU(inplace=True), enc_gru_conv=ConvGRU2d, dec_gru_conv=ConvGRU2d, last_conv=ConvGRU2d, conv=nn.Conv2d):
+    def __init__(self, in_channels, enc_channels = None, dec_channels = None, n_enc_convs=3, n_dec_convs=3, gru_all=False, act=nn.ReLU(inplace=True), enc_gru_conv=ConvGRU2d, dec_gru_conv=ConvGRU2d, last_conv=ConvGRU2d, conv=nn.Conv2d):
+        if enc_channels is None:
+            enc_channels = [64, 128, 256, 512]
+        if dec_channels is None:
+            dec_channels = [256, 128, 64]
         super().__init__()
         self.n_rnn = 0
         self.act = act
@@ -281,7 +284,7 @@ def test():
     torch.set_grad_enabled(False)
     x = torch.zeros(4, 3, 484, 648).cuda()
 
-    from tma_model_zoo.unet import MemorySavingUNet
+    from tma_model_zoo.universal.unet import MemorySavingUNet
     conv = nn.Conv2d(3, 64, 3, 1, 1, bias=False).cuda()
     u2net = MemorySavingUNet(64, enc_channels=[64, 128, 256], dec_channels=[256, 128, 64], n_enc_convs=2, n_dec_convs=2).cuda()
 

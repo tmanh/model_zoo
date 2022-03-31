@@ -1,16 +1,14 @@
-from lib2to3.pgen2.tokenize import TokenError
 import torch
 import torch.nn as nn
 import torch.nn.functional as functional
-import numpy as np
 
-from .gru import GRUUNet
-from .basics.geometry import tensor_warping
-from .basics.activation import stable_softmax
-from .basics.dynamic_conv import Deconv, DynamicConv2d
-from .basics.upsampling import Upsample
-from .universal import VGGUNet, ResnetUNet
-from .depth_volumes import DepthVolume1D, BaseDepthVolumeModel
+from ..universal.gru import GRUUNet
+from ..basics.geometry import tensor_warping
+from ..basics.activation import stable_softmax
+from ..basics.dynamic_conv import Deconv, DynamicConv2d
+from ..basics.upsampling import Upsample
+from ..universal import VGGUNet, ResnetUNet
+from ..depth_volumes import DepthVolume1D, BaseDepthVolumeModel
 
 
 class FCVS(BaseDepthVolumeModel):

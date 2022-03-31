@@ -1,6 +1,8 @@
-from re import I
 import torch
+import torch.nn as nn
 import torch.nn.functional as functional
+
+import torchvision
 
 from math import exp
 from torch.autograd import Variable
@@ -121,10 +123,7 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
 
     ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2))
 
-    if size_average:
-        return ssim_map.mean()
-    else:
-        return ssim_map.mean(1).mean(1).mean(1)
+    return ssim_map.mean() if size_average else ssim_map.mean(1).mean(1).mean(1)
 
 ##################### HIT MSE #####################
 
@@ -180,3 +179,68 @@ def hit_rate(target, output, mask):
     delta_125_3 = miss(target, output, mask, 1.25 ** 3)
 
     return delta_105, delta_110, delta_125_1, delta_125_2, delta_125_3
+
+
+##################### SSIM #####################
+
+
+class VGGPerceptualLoss(nn.Module):
+    def __init__(self, inp_scale="-11", mode='vgg19'):
+        super().__init__()
+        self.inp_scale = inp_scale
+        self.mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+        self.std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+
+        self.mode = mode
+
+        if mode == 'vgg19':
+            self.vgg = torchvision.models.vgg19(pretrained=True).features
+        else:
+            self.vgg = torchvision.models.vgg16(pretrained=True).features
+
+    def forward(self, es, ta):
+        self.vgg = self.vgg.to(es.device)
+        self.mean = self.mean.to(es.device)
+        self.std = self.std.to(es.device)
+
+        es = (es - self.mean) / self.std
+        ta = (ta - self.mean) / self.std
+
+        if self.mode == 'vgg19':
+            return self.compute_loss_vgg19(es, ta)
+        return self.compute_loss_vgg16(es, ta)
+
+    def compute_loss_vgg16(self, es, ta):
+        loss = 0
+        for midx, mod in enumerate(self.vgg):
+            es = mod(es)
+            with torch.no_grad():
+                ta = mod(ta)
+
+            if midx in [3, 8, 15, 22]:
+                loss += torch.abs(es - ta).mean()
+
+        return loss
+
+    def compute_loss_vgg19(self, es, ta):
+        loss = 0
+        for midx, mod in enumerate(self.vgg):
+            es = mod(es)
+            with torch.no_grad():
+                ta = mod(ta)
+
+            if midx in [13, 22]:
+                lam = 0.5
+                loss += torch.abs(es - ta).mean() * lam
+            elif midx == 3:
+                lam = 1
+                loss += torch.abs(es - ta).mean() * lam
+            elif midx == 31:
+                lam = 1
+                loss += torch.abs(es - ta).mean() * lam
+                break
+            elif midx == 8:
+                lam = 0.75
+                loss += torch.abs(es - ta).mean() * lam
+
+        return loss

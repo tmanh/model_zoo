@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from tma_model_zoo.basics.dynamic_conv import SamePaddingConv2dBlock
-from tma_model_zoo.resnet import ResBlock
+from tma_model_zoo.universal.resnet import ResBlock
 
 
 class BaseNet(nn.Module):

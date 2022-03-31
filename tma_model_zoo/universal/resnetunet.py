@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as functional
 
 
-def get_resnet(net):
+def get_resnet(net):  # sourcery skip: raise-specific-error
     if net == 'resnet18':
         return torchvision.models.resnet18(pretrained=True)
     elif net == 'resnet34':
@@ -20,7 +20,7 @@ def get_resnet(net):
 
 
 class ResnetUNet(nn.Module):
-    def __init__(self, net='resnet34', n_encoder_stages=3, n_decoder_convs=2, freeze_resnet=True):
+    def __init__(self, net='resnet34', freeze_resnet=True):
         super().__init__()
 
         self.resnet = get_resnet(net)

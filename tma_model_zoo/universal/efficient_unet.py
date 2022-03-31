@@ -3,7 +3,7 @@ import torch.nn as nn
 
 from .efficient import MBConvBlock
 from .efficient_utils import GlobalParams, BlockDecoder
-from .basics.upsampling import Upsample
+from ..basics.upsampling import Upsample
 
 
 class EfficientUnet(nn.Module):

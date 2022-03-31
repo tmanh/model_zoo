@@ -2,11 +2,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .basics.padding import same_padding
-from .basics.geometry import tensor_warping
-from .basics.activation import stable_softmax
-from .basics.dynamic_conv import Deconv, DynamicConv2d
-from .depth_volumes import DepthVolume2D, BaseDepthVolumeModel
+from ..basics.padding import same_padding
+from ..basics.geometry import tensor_warping
+from ..basics.activation import stable_softmax
+from ..basics.dynamic_conv import Deconv, DynamicConv2d
+from ..depth_volumes import DepthVolume2D, BaseDepthVolumeModel
 
 
 class BaseVisibility(BaseDepthVolumeModel):

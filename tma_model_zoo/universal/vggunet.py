@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as functional
 
 
-def get_vgg_net(net):
+def get_vgg_net(net):  # sourcery skip: raise-specific-error
     if net == 'vgg16':
         return torchvision.models.vgg16(pretrained=True).features
     elif net == 'vgg19':
@@ -13,7 +13,7 @@ def get_vgg_net(net):
         raise Exception('invalid vgg net')
 
 
-def create_pooling_layer(pool):
+def create_pooling_layer(pool):  # sourcery skip: raise-specific-error
     if pool == 'average':
         enc = [nn.AvgPool2d(kernel_size=2, stride=2, padding=0, ceil_mode=False)]
     elif pool == 'max':

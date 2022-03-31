@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as functional
 
-from .basics.dynamic_conv import SamePaddingConv2d
-from .basics.swish import MemoryEfficientSwish, Swish
+from ..basics.dynamic_conv import SamePaddingConv2d
+from ..basics.swish import MemoryEfficientSwish, Swish
 from .efficient_utils import round_filters, round_repeats, drop_connect, efficientnet_params, get_model_params, load_pretrained_weights
 
 

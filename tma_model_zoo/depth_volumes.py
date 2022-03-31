@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .snet import SNetDS2BN_base_8
+from .universal.snet import SNetDS2BN_base_8
 from .basics.conv_gru import ConvGRU2d
 from .basics.padding import same_padding
 from .basics.geometry import create_sampling_map_target2source, tensor_warping

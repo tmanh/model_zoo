@@ -5,8 +5,8 @@ import torch.nn as nn
 
 from tma_model_zoo.basics.dynamic_conv import DynamicConv2d
 from tma_model_zoo.basics.upsampling import Upsample
-from tma_model_zoo.efficient import EfficientNet
-from tma_model_zoo.resnet import Resnet
+from tma_model_zoo.universal.efficient import EfficientNet
+from tma_model_zoo.universal.resnet import Resnet
 
 
 class ConvBlock(nn.Module):

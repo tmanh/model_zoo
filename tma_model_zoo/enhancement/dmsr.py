@@ -4,7 +4,7 @@ import time
 import torch
 import torch.nn as nn
 
-from tma_model_zoo.resnet import Resnet
+from tma_model_zoo.universal.resnet import Resnet
 from tma_model_zoo.basics.mapnet import MapNet, ResidualMapNet
 
 

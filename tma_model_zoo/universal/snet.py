@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from .basics.dynamic_conv import DynamicConv2d
+from ..basics.dynamic_conv import DynamicConv2d
 
 
 class SNetDS2BN_base_8(nn.Module):

@@ -4,12 +4,12 @@ import torch
 import numpy as np
 import torch.nn as nn
 
-from .utils.activations import softmax_helper
+from ..utils.activations import softmax_helper
 
-from .utils.initialization import HeInitializer
-from .basics import ConvDropoutNormNonlin
-from .basics import StackedConvLayers
-from .basics import Upsample
+from ..utils.initialization import HeInitializer
+from ..basics import ConvDropoutNormNonlin
+from ..basics import StackedConvLayers
+from ..basics import Upsample
 
 from nnunet.network_architecture.neural_network import SegmentationNetwork
 
