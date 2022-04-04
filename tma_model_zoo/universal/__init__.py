@@ -8,3 +8,4 @@ from .efficient import *
 from .efficient_unet import *
 from .efficient_resnet import *
 from .snet import *
+from .residual_gru import *

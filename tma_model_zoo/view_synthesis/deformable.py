@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as functional
 
 from ..basics.deform import DeformableModule
-from ..universal import MemorySavingUNet, GRUUNet, VGGUNet
+from ..universal import *
 
 
 class DeformableNetwork(DeformableModule):

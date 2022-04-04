@@ -1,4 +1,5 @@
 import os
+import numpy as np
 
 from .adversarial import *
 from .basics import *
@@ -16,7 +17,7 @@ class Loss(nn.modules.loss._Loss):
         self.generate_loss_modules(args)
 
         device = torch.device('cpu' if args.cpu else 'cuda')
-        self.log = torch.zeros(len(self.loss), device=device)
+        self.log = np.zeros(len(self.loss))
         self.loss_module.to(device)
 
         if not args.cpu and args.n_gpus > 1:
@@ -32,9 +33,6 @@ class Loss(nn.modules.loss._Loss):
             weight, loss_type = loss.split('*')
             if loss_type == 'Fusion':
                 loss_function = SynthesisLoss(args.mode)
-            elif loss_type == 'LIP':
-                module = import_module('src.loss.DataFusion.Basic')
-                loss_function = getattr(module, 'LIPLoss')(args.mode)
             elif loss_type == 'VGG':
                 loss_function = VGGPerceptualLoss(args.mode)
             else:
@@ -61,17 +59,23 @@ class Loss(nn.modules.loss._Loss):
         total_loss = 0
 
         for i, l in enumerate(self.loss):
+            effective_loss = 0
             if l['type'] in ['GAN', 'VGG']:
                 loss = l['function'](deep_images[0], target[:, 0])
                 effective_loss = l['weight'] * loss
-                if l['type'] == 'GAN':
-                    self.log[i + 1] += (l['function'].loss_d * loss).item()
             elif l['type'] not in ['Total', 'DIS']:
                 loss = l['function'](deep_images, target, depths, poses, valid_mask)
                 effective_loss = l['weight'] * loss
-    
-            self.log[i] += effective_loss
+
+            if l['type'] == 'GAN':
+                self.log[i + 1] += (l['function'].loss_d * loss).detach().cpu().numpy()
+            
+            if not isinstance(effective_loss, int):
+                self.log[i] += effective_loss.detach().cpu().numpy()
+
             total_loss += effective_loss
+
+        self.log[-1] += total_loss.detach().cpu().numpy()
 
         return total_loss
 

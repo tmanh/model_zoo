@@ -39,9 +39,9 @@ class SamePaddingNormConv2dBlock(nn.Module):
 
 
 class DynamicConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, dilation=1, batch_norm=True, act=nn.ReLU(inplace=True)):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, dilation=1, batch_norm=True, act=nn.ReLU(inplace=True), bias=False):
         super().__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=int(dilation * (kernel_size - 1) / 2), dilation=dilation, bias=False)
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=int(dilation * (kernel_size - 1) / 2), dilation=dilation, bias=bias)
         self.act = act
         self.bn = nn.BatchNorm2d(out_channels) if batch_norm else None
 

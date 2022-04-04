@@ -52,8 +52,8 @@ class BaseGRUUNet(nn.Module):
                 self.n_rnn += 1
                 mods.append(self.enc_gru_conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False))
             else:
-                mods.append(self.conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False))
-                mods.append(self.act)
+                mods.extend((self.conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False), self.act))
+
             channels_in = channels_out
             stride = 1
         return nn.Sequential(*mods)
@@ -68,8 +68,8 @@ class BaseGRUUNet(nn.Module):
                 else:
                     mods.append(self.dec_gru_conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False))
             else:
-                mods.append(self.conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False))
-                mods.append(self.act)
+                mods.extend((self.conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False), self.act))
+
             channels_in = channels_out
         return nn.Sequential(*mods)
 
@@ -102,8 +102,11 @@ class BaseGRUUNet(nn.Module):
 
 
 class GRUUNet(BaseGRUUNet):
-    def __init__(self, channels_in, enc_channels=[64, 128, 256, 512], dec_channels=[256, 128, 64], n_enc_convs=3, n_dec_convs=3, gru_all=False,
-                 act=nn.ReLU(inplace=True), enc_gru_conv=ConvGRU2d, dec_gru_conv=ConvGRU2d, last_conv=ConvGRU2d, conv=nn.Conv2d):
+    def __init__(self, channels_in, enc_channels = None, dec_channels = None, n_enc_convs=3, n_dec_convs=3, gru_all=False, act=nn.ReLU(inplace=True), enc_gru_conv=ConvGRU2d, dec_gru_conv=ConvGRU2d, last_conv=ConvGRU2d, conv=nn.Conv2d):
+        if enc_channels is None:
+            enc_channels = [64, 128, 256, 512]
+        if dec_channels is None:
+            dec_channels = [256, 128, 64]
         super().__init__(channels_in, enc_channels, dec_channels, n_enc_convs, n_dec_convs, gru_all, act, enc_gru_conv, dec_gru_conv, last_conv, conv)
         
     def init_decoders(self):
@@ -136,8 +139,11 @@ class GRUUNet(BaseGRUUNet):
 
 
 class MemorySavingGRUUNet(BaseGRUUNet):
-    def __init__(self, channels_in, enc_channels=[64, 128, 256, 512], dec_channels=[512, 256, 128, 64], n_enc_convs=3, n_dec_convs=3, gru_all=False,
-                 act=nn.ReLU(inplace=True), enc_gru_conv=ConvGRU2d, dec_gru_conv=ConvGRU2d, last_conv=ConvGRU2d, conv=nn.Conv2d):
+    def __init__(self, channels_in, enc_channels = None, dec_channels = None, n_enc_convs=3, n_dec_convs=3, gru_all=False, act=nn.ReLU(inplace=True), enc_gru_conv=ConvGRU2d, dec_gru_conv=ConvGRU2d, last_conv=ConvGRU2d, conv=nn.Conv2d):
+        if enc_channels is None:
+            enc_channels = [64, 128, 256, 512]
+        if dec_channels is None:
+            dec_channels = [512, 256, 128, 64]
         super().__init__(channels_in, enc_channels, dec_channels, n_enc_convs, n_dec_convs, gru_all, act, enc_gru_conv, dec_gru_conv, last_conv, conv)
 
     def _enc(self, channels_in, channels_out, stride=1, n_convs=2, gru_all=False):
@@ -147,11 +153,11 @@ class MemorySavingGRUUNet(BaseGRUUNet):
                 self.n_rnn += 1
                 mods.append(self.enc_gru_conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False))
             elif idx == 0:
-                mods.append(self.conv(channels_in, channels_out, kernel_size=3, stride=2, padding=1, bias=False))
-                mods.append(self.act)
+                mods.extend((self.conv(channels_in, channels_out, kernel_size=3, stride=2, padding=1, bias=False), self.act))
+
             else:
-                mods.append(self.conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False))
-                mods.append(self.act)
+                mods.extend((self.conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False), self.act))
+
             channels_in = channels_out
         return nn.Sequential(*mods)
 
@@ -207,8 +213,11 @@ class MemorySavingGRUUNet(BaseGRUUNet):
 
 
 class ResidualGRUUNet(BaseGRUUNet):
-    def __init__(self, channels_in, enc_channels=[64, 128, 256, 512], dec_channels=[512, 256, 128, 64], n_enc_convs=3, n_dec_convs=3, gru_all=False,
-                 act=nn.ReLU(inplace=True), enc_gru_conv=ConvGRU2d, dec_gru_conv=ConvGRU2d, last_conv=ConvGRU2d, conv=nn.Conv2d):
+    def __init__(self, channels_in, enc_channels = None, dec_channels = None, n_enc_convs=3, n_dec_convs=3, gru_all=False, act=nn.ReLU(inplace=True), enc_gru_conv=ConvGRU2d, dec_gru_conv=ConvGRU2d, last_conv=ConvGRU2d, conv=nn.Conv2d):
+        if enc_channels is None:
+            enc_channels = [64, 128, 256, 512]
+        if dec_channels is None:
+            dec_channels = [512, 256, 128, 64]
         super().__init__(channels_in, enc_channels, dec_channels, n_enc_convs, n_dec_convs, gru_all, act, enc_gru_conv, dec_gru_conv, last_conv, conv)
 
     def _enc(self, channels_in, channels_out, stride=1, n_convs=2, gru_all=False):
@@ -218,11 +227,10 @@ class ResidualGRUUNet(BaseGRUUNet):
                 self.n_rnn += 1
                 mods.append(self.enc_gru_conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False))
             elif idx == 0:
-                mods.append(self.conv(channels_in, channels_out, kernel_size=3, stride=2, padding=1, bias=False))
-                mods.append(self.act)
+                mods.extend((self.conv(channels_in, channels_out, kernel_size=3, stride=2, padding=1, bias=False), self.act))
             else:
-                mods.append(self.conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False))
-                mods.append(self.act)
+                mods.extend((self.conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False), self.act))
+
             channels_in = channels_out
         return nn.Sequential(*mods)
 
