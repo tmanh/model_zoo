@@ -33,11 +33,8 @@ class BaseVisibility(BaseDepthVolumeModel):
 
     def forward(self, src_images, ys_dst, xs_dst, ys_src, xs_src, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
         n_samples, n_views, _, height, width = src_images.shape
-
-        old_ys_dst, old_xs_dst, old_ys_src, old_xs_src = ys_dst.detach().clone(), xs_dst.detach().clone(), ys_src.detach().clone(), xs_src.detach().clone()
         old_dst_intrinsics, old_src_intrinsics = dst_intrinsics.detach().clone(), src_intrinsics.detach().clone()
-        depth_probs, src_weights = self.depth_volume_model(src_images, ys_dst, xs_dst, ys_src, xs_src, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics)
-        ys_dst, xs_dst, ys_src, xs_src = old_ys_dst, old_xs_dst, old_ys_src, old_xs_src
+        depth_probs, src_weights = self.depth_volume_model(src_images, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics)
         dst_intrinsics, src_intrinsics = old_dst_intrinsics, old_src_intrinsics
 
         # ======== src weights ============
@@ -55,7 +52,7 @@ class BaseVisibility(BaseDepthVolumeModel):
         depth_prob_volume_softmax = stable_softmax(depth_probs_full_size, dim=1)
 
         # =============================== warp images =========================================
-        sampling_maps, src_masks = self.compute_sampling_maps(n_samples, n_views, ys_dst, xs_dst, ys_src, xs_src, height, width, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics)
+        sampling_maps, src_masks = self.compute_sampling_maps(n_samples, n_views, height, width, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics)
         sampling_maps = sampling_maps.permute(0, 1, 2, 4, 5, 3)
         src_masks = src_masks.view(n_samples, n_views, -1, height, width)
         warped_imgs_srcs = self.warp_images(src_images, sampling_maps, n_views).permute(2, 0, 1, 3, 4, 5)
@@ -64,9 +61,9 @@ class BaseVisibility(BaseDepthVolumeModel):
         # =============== handle source weights with masks (valid warp pixels) ===========
         src_weights_softmax = src_weights_softmax * src_masks  # [N, V, D, H, W, 1]
         src_weights_softmax_sum = torch.sum(src_weights_softmax, dim=1, keepdims=True)
-        src_weights_softmax_sum_zero_add = (src_weights_softmax_sum == 0.0).float() * 1e-7
+        src_weights_softmax_sum_zero_add = (src_weights_softmax_sum == 0.0).float() + 1e-7
         src_weights_softmax_sum += src_weights_softmax_sum_zero_add
-        src_weights_softmax = src_weights_softmax/(src_weights_softmax_sum)
+        src_weights_softmax = src_weights_softmax / (src_weights_softmax_sum)
 
         # =============== Compute aggregated images =====================================
         weighted_src_img = torch.sum(src_weights_softmax.view(n_samples, n_views, self.depth_num, 1, height, width) * warped_imgs_srcs, dim=1) # [D, B, H, W, 3]

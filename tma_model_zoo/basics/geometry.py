@@ -2,26 +2,24 @@ import torch
 import torch.nn.functional as functional
 
 
-def create_loc_matrix(depth_value, y_start, x_start, height, width, device):
-    y = torch.arange(start=int(y_start), end=int(height+y_start), device=device).view(1, height, 1).repeat(1, 1, width)       # columns
-    x = torch.arange(start=int(x_start), end=int(width+x_start), device=device).view(1, 1, width).repeat(1, height, 1)        # rows
+def create_loc_matrix(depth_value, height, width, device):
+    y = torch.arange(start=0, end=int(height), device=device).view(1, height, 1).repeat(1, 1, width)       # columns
+    x = torch.arange(start=0, end=int(width), device=device).view(1, 1, width).repeat(1, height, 1)        # rows
     ones = torch.ones((1, height, width), device=device)
     z = depth_value * ones
 
     return torch.cat([x * z, y * z, z, ones], dim=0).view((4, -1))
 
 
-def create_sampling_map_target2source(depth_value, y_dst, x_dst, y_src, x_src, height, width, dst_intrinsic, dst_extrinsic, src_intrinsic, src_extrinsic):
+def create_sampling_map_target2source(depth_value, height, width, dst_intrinsic, dst_extrinsic, src_intrinsic, src_extrinsic):
     # compute location matrix
-    pos_matrix = create_loc_matrix(depth_value, y_dst, x_dst, height, width, dst_intrinsic.device).reshape(4, -1)
+    pos_matrix = create_loc_matrix(depth_value, height, width, dst_intrinsic.device).reshape(4, -1)
     pos_matrix = torch.linalg.inv((dst_intrinsic @ dst_extrinsic)) @ pos_matrix
     pos_matrix = src_intrinsic @ src_extrinsic @ pos_matrix
     pos_matrix = pos_matrix.reshape((4, height, width))
 
     # compute sampling maps
     sampling_map = pos_matrix[:2, :, :] / (pos_matrix[2:3, :, :] + 1e-7)
-    sampling_map[0, :, :] -= x_src
-    sampling_map[1, :, :] -= y_src
 
     # compute mask
     mask0 = (sampling_map[0:1, ...] >= 0).float()
@@ -35,6 +33,39 @@ def create_sampling_map_target2source(depth_value, y_dst, x_dst, y_src, x_src, h
     sampling_map[1, :, :] = (sampling_map[1, :, :] / height) * 2 - 1
 
     return sampling_map.reshape((1, 1, 1, 2, height, width)), mask.reshape((1, 1, 1, 1, height, width))
+
+
+def create_sampling_map_src2tgt(depth_value, height, width, dst_intrinsic, dst_extrinsic, src_intrinsic, src_extrinsic):
+    # compute location matrix
+    pos_matrix = create_loc_matrix(depth_value, 0, 0, height, width, dst_intrinsic.device).reshape(4, -1)
+    pos_matrix = torch.linalg.inv((src_intrinsic @ src_extrinsic)) @ pos_matrix
+    pos_matrix = dst_intrinsic @ dst_extrinsic @ pos_matrix
+    pos_matrix = pos_matrix.reshape((4, height, width))
+
+    # compute sampling maps
+    sampling_map = 15000 * torch.ones((2, height, width), device=dst_intrinsic.device)
+    locations = (pos_matrix[:2, :, :] / (pos_matrix[2:3, :, :] + 1e-7)).long()
+
+    grid_y, grid_x = torch.meshgrid(torch.arange(height), torch.arange(width))
+    grid = torch.cat([grid_x.view(1, height, width), grid_y.view(1, height, width)], dim=0).float().to(dst_intrinsic.device)
+
+    # compute mask
+    mask0 = (locations[0:1, ...] >= 0).float()
+    mask1 = (locations[0:1, ...] < width).float()
+    mask2 = (locations[1:2, ...] >= 0).float()
+    mask3 = (locations[1:2, ...] < height).float()
+    mask = (mask0 * mask1 * mask2 * mask3).bool().view(1, height, width).repeat(2, 1, 1)  # indicator of valid value (1: valid, 0: invalid)
+
+    selected_locations = locations[mask].view(2, -1)
+    selected_grid = grid[mask].view(2, -1)
+
+    sampling_map[:, selected_locations[1], selected_locations[0]] = selected_grid
+
+    # normalize
+    sampling_map[0, :, :] = (sampling_map[0, :, :] / width) * 2 - 1
+    sampling_map[1, :, :] = (sampling_map[1, :, :] / height) * 2 - 1
+
+    return sampling_map.reshape((2, height, width))
 
 
 def tensor_warping(input_image, sampling_map, mode='bilinear'):

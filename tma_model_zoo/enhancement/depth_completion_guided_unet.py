@@ -193,7 +193,7 @@ class GuidedEfficientNet(nn.Module):
         super().__init__()
 
         self.mode = mode
-        self.backbone = StageEfficientNet.from_pretrained(backbone, in_channels=4 if self.mode == 'efficient-rgbm' else 3)
+        self.backbone = StageEfficientNet.from_pretrained(backbone, in_channels=4 if 'efficient-rgbm' in self.mode else 3)
 
         self.depth_conv = Resnet(1, n_feats, 3, n_resblocks, n_feats, act)
 
@@ -203,13 +203,13 @@ class GuidedEfficientNet(nn.Module):
         self.ups = nn.ModuleList([ConvBlock(n_feats, n_feats, down_size=False) for _ in enc_in_channels])
 
         self.n_output = 1
-        if 'u' in self.mode:
+        if '-u' in self.mode:
             self.n_output = 64
-            self.min_d, self.max_d = 0.5, 15
+            self.min_d, self.max_d = 0.5, 10
             self.softmax = nn.Softmax(dim=1)
 
         self.out_net = DynamicConv2d(n_feats, self.n_output, batch_norm=False, act=act)
-        self.upscale = Upsample()
+        self.upscale = Upsample(mode='bilinear')
 
         if 'efficient-rgb-m' in self.mode:
             mask_in_channels = [mask_channels, *enc_in_channels[:-1]]
@@ -258,12 +258,15 @@ class GuidedEfficientNet(nn.Module):
             mask_feats = self.compute_mask_feats(mask)
             guidance_feats = [guidance_feats[i] * mask_feats[i] for i in range(len(mask_feats))]
         else:
-            guidance_feats = self.backbone(torch.cat([color, mask], dim=1))[::-1]
+            guidance_feats = self.backbone(torch.cat([color, depth], dim=1))[::-1]
 
         up_feats = shallow_feats + self.compute_upscaled_feats(depth_feats, guidance_feats, height, width)
         out = self.out_net(up_feats)
 
-        if 'u' in self.mode:
+        if 'residual' in self.mode:
+            out = out + depth
+
+        if '-u' in self.mode:
             list_depth = torch.linspace(self.min_d, self.max_d, self.n_output, device=out.device).view(1, self.n_output, 1, 1)
             list_depth = list_depth.repeat(n_samples, 1, height, width)
             out = torch.sum(self.softmax(out) * list_depth, dim=1, keepdims=True)

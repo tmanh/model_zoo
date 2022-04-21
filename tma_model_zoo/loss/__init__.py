@@ -33,6 +33,8 @@ class Loss(nn.modules.loss._Loss):
             weight, loss_type = loss.split('*')
             if loss_type == 'Fusion':
                 loss_function = SynthesisLoss(args.mode)
+            elif loss_type == 'PRJ':
+                loss_function = ProjectionLoss()
             elif loss_type == 'VGG':
                 loss_function = VGGPerceptualLoss(args.mode)
             else:
@@ -55,17 +57,24 @@ class Loss(nn.modules.loss._Loss):
                 print('{:.3f} * {}'.format(l['weight'], l['type']))
                 self.loss_module.append(l['function'])
 
-    def forward(self, deep_images, target, depths, poses, valid_mask):
+    # refine, deep_dst_color, deep_prj_colors, deep_depths, dst_color, dst_depth, src_colors, src_depths, dst_intrinsic, dst_extrinsic, src_inrinsics, src_extrinsics, valid_mask
+    def forward(self, tensors):
         total_loss = 0
 
         for i, l in enumerate(self.loss):
             effective_loss = 0
             if l['type'] in ['GAN', 'VGG']:
-                loss = l['function'](deep_images[0], target[:, 0])
-                effective_loss = l['weight'] * loss
+                if 'refine' in tensors.keys() and tensors['refine'] is not None:
+                    loss = l['function'](tensors['refine'], tensors['dst_color'])
+                elif 'deep_dst_color' in tensors.keys() and tensors['deep_dst_color'] is not None:
+                    loss = l['function'](tensors['deep_dst_color'], tensors['dst_color'])
+                else:
+                    loss = l['function'](tensors['output'], tensors['dst_color'])
+            elif l['type'] in ['PRJ']:
+                loss = l['function'](tensors)
             elif l['type'] not in ['Total', 'DIS']:
-                loss = l['function'](deep_images, target, depths, poses, valid_mask)
-                effective_loss = l['weight'] * loss
+                loss = l['function'](tensors['refine'], tensors['deep_dst_color'], tensors['deep_prj_colors'], tensors['prj_colors'], tensors['dst_color'])
+            effective_loss = l['weight'] * loss
 
             if l['type'] == 'GAN':
                 self.log[i + 1] += (l['function'].loss_d * loss).detach().cpu().numpy()
@@ -78,6 +87,9 @@ class Loss(nn.modules.loss._Loss):
         self.log[-1] += total_loss.detach().cpu().numpy()
 
         return total_loss
+
+    def reset_log(self):
+        self.log = np.zeros(len(self.loss))
 
     def step(self):
         for loss in self.get_loss_module():

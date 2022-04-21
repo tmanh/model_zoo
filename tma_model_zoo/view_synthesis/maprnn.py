@@ -26,7 +26,10 @@ class MappingRNN(nn.Module):
     def compute_network_output(self, projected_depths, out_colors, alphas, preprocessing):
         valid_masks = (projected_depths > 0).float()
         valid_mask = (torch.sum(valid_masks, dim=1) > 0).float()
-        return self.compute_out_color(out_colors, alphas, preprocessing), valid_mask
+
+        output = self.compute_out_color(out_colors, alphas, preprocessing)
+        output['valid_mask'] = valid_mask
+        return output
 
     def compute_out_color(self, colors, alphas, preprocessing):
         colors = torch.stack(colors)
@@ -37,13 +40,9 @@ class MappingRNN(nn.Module):
         alphas = torch.stack(alphas)
         alphas = torch.softmax(alphas, dim=0)
 
-        x1 = (alphas * colors).sum(dim=0)
+        refine = (alphas * colors).sum(dim=0)
 
-        if self.train_enhance:
-            n_views, n_samples, n_channels, height, width = colors.shape
-            return (colors.permute(1, 0, 2, 3, 4).view(n_samples * n_views, n_channels, height, width), x1,)
-        
-        return (x1, colors.permute(1, 0, 2, 3, 4),)
+        return {'refine': refine, 'deep_dst_color': None, 'deep_prj_colors': colors.permute(1, 0, 2, 3, 4), 'prj_colors': None, 'dst_color': None, 'valid_mask': None}
 
     def estimate_view_color(self, x, out_colors, alphas):
         out_colors.append(self.rgb_conv(x))

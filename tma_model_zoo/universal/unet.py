@@ -4,8 +4,11 @@ import torch.nn.functional as functional
 
 
 class BaseUNet(nn.Module):
-    def __init__(self, in_channels, enc_channels=[64, 128, 256, 512], dec_channels=[256, 128, 64], n_enc_convs=3, n_dec_convs=3,
-                 act=nn.ReLU(inplace=True), conv=nn.Conv2d):
+    def __init__(self, in_channels, enc_channels = None, dec_channels = None, n_enc_convs=3, n_dec_convs=3, act=nn.ReLU(inplace=True), conv=nn.Conv2d):
+        if enc_channels is None:
+            enc_channels = [64, 128, 256, 512]
+        if dec_channels is None:
+            dec_channels = [256, 128, 64]
         super().__init__()
         self.n_rnn = 0
         self.act = act
@@ -48,8 +51,8 @@ class BaseUNet(nn.Module):
     def _dec(self, in_channels, channels_out, n_convs=2):
         mods = []
         for _ in range(n_convs):
-            mods.append(self.conv(in_channels, channels_out, kernel_size=3, padding=1, bias=False))
-            mods.append(self.act)
+            mods.extend((self.conv(in_channels, channels_out, kernel_size=3, padding=1, bias=False), self.act))
+
             in_channels = channels_out
         return nn.Sequential(*mods)
 
@@ -73,8 +76,11 @@ class BaseUNet(nn.Module):
 
 
 class UNet(BaseUNet):
-    def __init__(self, in_channels, enc_channels=[64, 128, 256, 512], dec_channels=[256, 128, 64], n_enc_convs=3, n_dec_convs=3, gru_all=False,
-                 act=nn.ReLU(inplace=True), conv=nn.Conv2d):
+    def __init__(self, in_channels, enc_channels = None, dec_channels = None, n_enc_convs=3, n_dec_convs=3, gru_all=False, act=nn.ReLU(inplace=True), conv=nn.Conv2d):
+        if enc_channels is None:
+            enc_channels = [64, 128, 256, 512]
+        if dec_channels is None:
+            dec_channels = [256, 128, 64]
         super().__init__(in_channels, enc_channels, dec_channels, n_enc_convs, n_dec_convs, act, conv)
         
     def init_decoders(self):
@@ -102,8 +108,11 @@ class UNet(BaseUNet):
 
 
 class MemorySavingUNet(BaseUNet):
-    def __init__(self, in_channels, enc_channels=[64, 128, 256, 512], dec_channels=[512, 256, 128, 64], n_enc_convs=3, n_dec_convs=3,
-                 act=nn.ReLU(inplace=True), conv=nn.Conv2d):
+    def __init__(self, in_channels, enc_channels = None, dec_channels = None, n_enc_convs=3, n_dec_convs=3, act=nn.ReLU(inplace=True), conv=nn.Conv2d):
+        if enc_channels is None:
+            enc_channels = [64, 128, 256, 512]
+        if dec_channels is None:
+            dec_channels = [512, 256, 128, 64]
         super().__init__(in_channels, enc_channels, dec_channels, n_enc_convs, n_dec_convs, act, conv)
 
     def _enc(self, in_channels, channels_out, stride=1, n_convs=2):
@@ -159,8 +168,11 @@ class MemorySavingUNet(BaseUNet):
 
 
 class ResidualUNet(BaseUNet):
-    def __init__(self, in_channels, enc_channels=[64, 128, 256, 512], dec_channels=[512, 256, 128, 64], n_enc_convs=3, n_dec_convs=3,
-                 act=nn.ReLU(inplace=True), conv=nn.Conv2d):
+    def __init__(self, in_channels, enc_channels = None, dec_channels = None, n_enc_convs=3, n_dec_convs=3, act=nn.ReLU(inplace=True), conv=nn.Conv2d):
+        if enc_channels is None:
+            enc_channels = [64, 128, 256, 512]
+        if dec_channels is None:
+            dec_channels = [256, 128, 64, 64, 64]
         super().__init__(in_channels, enc_channels, dec_channels, n_enc_convs, n_dec_convs, act, conv)
 
     def _enc(self, in_channels, channels_out, stride=1, n_convs=2):
@@ -172,6 +184,7 @@ class ResidualUNet(BaseUNet):
                 mods.append(self.conv(in_channels, channels_out, kernel_size=3, padding=1, bias=False))
             mods.append(self.act)
             in_channels = channels_out
+
         return nn.Sequential(*mods)
 
     def init_encoders(self):
@@ -180,24 +193,25 @@ class ResidualUNet(BaseUNet):
         for cout in self.enc_channels:
             self.encoders.append(self._enc(cin, cout, stride=stride, n_convs=self.n_enc_convs))
             cin = cout
+
+        self.encoders.append(nn.Sequential(*[self.conv(self.enc_channels[-1], self.enc_channels[-1], kernel_size=1, padding=1, bias=False)]))
         self.encoders = nn.ModuleList(self.encoders)
         
     def init_decoders(self):
-        cin = self.enc_channels[-1] + self.enc_channels[-2]
+        cin = self.enc_channels[-1]
         decs = []
-        for idx, cout in enumerate(self.dec_channels):
+        for cout in self.dec_channels:
             decs.append(self._dec(cin, cout, n_convs=self.n_dec_convs))
-            cin = cout + self.enc_channels[max(-idx - 3, -len(self.enc_channels))]
+            cin = cout
         self.decs = nn.ModuleList(decs)
 
     def encode(self, x):
         feats = [x]
+
         for enc in self.encoders:
-            for i, mod in enumerate(enc):
+            for mod in enc:
                 x = mod(x)
-                if i == 0:
-                    bx = x
-                x = x + bx
+
             feats.append(x)
         return x, feats
 
@@ -206,8 +220,8 @@ class ResidualUNet(BaseUNet):
             x0 = feats.pop()
             x1 = feats.pop()
             x0 = functional.interpolate(x0, size=(x1.shape[2], x1.shape[3]), mode='nearest')
-            x = torch.cat((x0, x1), dim=1)
-            del x0, x1
+
+            x = x0 if x0.shape[1] != x1.shape[1] else x0 + x1
             for mod in dec:
                 x = mod(x)
             feats.append(x)

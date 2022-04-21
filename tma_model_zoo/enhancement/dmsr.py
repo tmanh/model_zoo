@@ -4,8 +4,44 @@ import time
 import torch
 import torch.nn as nn
 
-from tma_model_zoo.universal.resnet import Resnet
-from tma_model_zoo.basics.mapnet import MapNet, ResidualMapNet
+from .depth_completion_guided_unet import GuidedEfficientNet
+from ..universal.resnet import Resnet
+from ..basics.mapnet import MapNet, ResidualMapNet
+
+
+class LightDMSR(nn.Module):
+    def __init__(self, n_feats=64, n_resblock=4):
+        super().__init__()
+
+        self.upscale = ResidualMapNet
+        self.depth_completion = GuidedEfficientNet(n_feats, act=nn.LeakyReLU(inplace=True), mode='efficient-rgbm-residual')
+        self.refine = Resnet(in_dim=n_feats, n_feats=n_feats, kernel_size=3, n_resblock=n_resblock, out_dim=1, tail=True)
+
+    @staticmethod
+    def backbone_out_size(in_h, in_w):
+        return in_h, in_w
+
+    def norm_input_data(self, depth_lr, color_lr):
+        norm_depth = depth_lr * 2 - 1
+        norm_color = color_lr * 2 - 1
+        return norm_depth, norm_color
+
+    def extract_features(self, norm_depth, norm_color):
+        depth_feature = self.d_1(norm_depth)
+        color_feature = self.c_1(norm_color)
+        return depth_feature, color_feature
+
+    def extract_upscaled_features(self, color_feature, sr_coarse):
+        sr_feature = self.d_1(sr_coarse)
+        return torch.cat([sr_feature, color_feature], dim=1)
+
+    def forward(self, depth_lr, color_lr, mask_lr, pos_mat, mapping_mat, mask=None):
+        depth_ilr, depth_feats = self.depth_completion(color_lr, depth_lr, mask_lr)
+
+        sr_coarse = self.upscale(pos_mat, mapping_mat, depth_feats, depth_ilr)
+        sr_refine = sr_coarse + self.refine(sr_coarse)
+       
+        return sr_refine, sr_coarse
 
 
 class BaseDMSR(nn.Module):
@@ -19,7 +55,7 @@ class BaseDMSR(nn.Module):
         self.d_1 = Resnet(in_dim=in_dim, n_feats=n_feats, kernel_size=3, n_resblock=n_resblock, out_dim=n_feats, tail=True)
         self.d_2 = Resnet(in_dim=n_feats, n_feats=n_feats, kernel_size=3, n_resblock=n_resblock, out_dim=n_feats, tail=True)
         self.c_1 = Resnet(in_dim=3, n_feats=n_feats, kernel_size=3, n_resblock=n_resblock, out_dim=n_feats, tail=True)
-        self.refine = Resnet(in_dim=n_feats * 2, n_feats=1, kernel_size=3, n_resblock=n_resblock, out_dim=n_feats, tail=True)
+        self.refine = Resnet(in_dim=n_feats * 2, n_feats=n_feats, kernel_size=3, n_resblock=n_resblock, out_dim=1, tail=True)
 
         self.upscale = mapnet
 
@@ -44,7 +80,7 @@ class BaseDMSR(nn.Module):
     def compute_sr_depth_map(self, sr_coarse, merged_features):
         sr_residual = self.refine(merged_features)
         sr_coarse, sr_refine = self.denorm_output_data(sr_coarse, sr_residual)
-        return sr_coarse,sr_refine
+        return sr_coarse, sr_refine
 
     def extract_upscaled_features(self, color_feature, sr_coarse):
         sr_feature = self.d_1(sr_coarse)
