@@ -32,7 +32,7 @@ class FCVS(BaseDepthVolumeModel):
         self.alpha_conv = nn.Conv2d(merge_feats, 1, kernel_size=1, stride=1, padding=0, bias=False)
 
         self.depth_volume_model = DepthVolume1D(depth_start=depth_start, depth_end=depth_end, depth_num=depth_num, n_feats=reduce_feats)
-        self.upsample = Upsample(mode='bilinear')
+        self.upsample = Upsample(mode='nearest')
 
         self.sheight = 128
         self.swidth = 160
@@ -56,9 +56,7 @@ class FCVS(BaseDepthVolumeModel):
         src_colors = src_colors.view(-1, n_channels, height, width)
         src_feats = self.enc_net(src_colors)
 
-        scaled_colors = functional.interpolate(src_colors, size=(self.sheight, self.swidth), mode='bilinear', align_corners=True)
-
-        reduced_feats = functional.interpolate(src_feats, size=(self.sheight, self.swidth), mode='bilinear', align_corners=True)
+        reduced_feats = functional.interpolate(src_feats, size=(self.sheight, self.swidth), mode='nearest')
 
         src_colors = src_colors.view(n_samples, n_views, n_channels, height, width)
         reduced_feats = reduced_feats.view(n_samples, n_views, -1, self.sheight, self.swidth)
@@ -69,7 +67,7 @@ class FCVS(BaseDepthVolumeModel):
         valid_masks = (prj_depths > 0).float()
         valid_mask = (torch.sum(valid_masks, dim=1) > 0).float()
 
-        return {'refine': aggregated_img, 'deep_dst_color': None, 'deep_prj_colors': None, 'prj_colors': None, 'dst_color': None, 'deep_src_depths': None,
+        return {'refine': aggregated_img, 'deep_dst_color': None, 'deep_prj_colors': warped_imgs_srcs, 'prj_colors': None, 'dst_color': None, 'deep_src_depths': None,
                 'valid_mask': valid_mask}
         exit()
 
@@ -116,10 +114,10 @@ class FCVS(BaseDepthVolumeModel):
 
     def warp_feats(self, src_colors, prj_depths, sampling_maps, n_samples, n_views, height, width, src_feats):
         sampling_maps = sampling_maps.reshape(n_samples * n_views, 2, height, width).permute(0, 2, 3, 1)
-        prj_feats = functional.grid_sample(src_feats, sampling_maps, mode='bilinear', padding_mode='zeros', align_corners=True)
+        prj_feats = functional.grid_sample(src_feats, sampling_maps, mode='nearest', padding_mode='zeros', align_corners=True)
         prj_feats = prj_feats.view(n_samples, n_views, -1, height, width)
 
-        prj_colors = functional.grid_sample(src_colors, sampling_maps, mode='bilinear', padding_mode='zeros', align_corners=True)
+        prj_colors = functional.grid_sample(src_colors, sampling_maps, mode='nearest', padding_mode='zeros', align_corners=True)
         prj_colors = prj_colors.view(n_samples, n_views, 3, height, width)
 
         prj_feats = torch.cat([prj_feats, prj_colors, prj_depths], dim=2)
@@ -145,7 +143,19 @@ class FCVS(BaseDepthVolumeModel):
         
     def ray_rendering(self, src_colors, reduced_feats, positions, iheight, iwidth, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
         n_samples, n_views, _, height, width = reduced_feats.shape
-        _depth_probs, _src_weights = self.depth_volume_model(reduced_feats, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics, height, width, positions)
+
+        new_dst_intrinsics, new_src_intrinsics = dst_intrinsics.detach().clone(), src_intrinsics.detach().clone()
+        sh, sw = height / iheight, width / iwidth
+        new_dst_intrinsics[:, :, 0, 0] = new_dst_intrinsics[:, :, 0, 0] * sw  # N, V, 4, 4
+        new_dst_intrinsics[:, :, 1, 1] = new_dst_intrinsics[:, :, 1, 1] * sh  # N, V, 4, 4
+        new_dst_intrinsics[:, :, 0, 2] = new_dst_intrinsics[:, :, 0, 2] * sw  # N, V, 4, 4
+        new_dst_intrinsics[:, :, 1, 2] = new_dst_intrinsics[:, :, 1, 2] * sh  # N, V, 4, 4
+        new_src_intrinsics[:, :, 0, 0] = new_src_intrinsics[:, :, 0, 0] * sw  # N, V, 4, 4
+        new_src_intrinsics[:, :, 1, 1] = new_src_intrinsics[:, :, 1, 1] * sh  # N, V, 4, 4
+        new_src_intrinsics[:, :, 0, 2] = new_src_intrinsics[:, :, 0, 2] * sw  # N, V, 4, 4
+        new_src_intrinsics[:, :, 1, 2] = new_src_intrinsics[:, :, 1, 2] * sh  # N, V, 4, 4
+
+        _depth_probs, _src_weights = self.depth_volume_model(reduced_feats, new_dst_intrinsics, dst_extrinsics, new_src_intrinsics, src_extrinsics, positions)
 
         if positions is not None:
             depth_probs = torch.zeros((n_samples, self.depth_num, 1, height, width), device=src_colors.device, dtype=_depth_probs.dtype)
@@ -160,8 +170,8 @@ class FCVS(BaseDepthVolumeModel):
 
         src_weights = src_weights.reshape(n_samples * n_views * self.depth_num, 1, height, width)
         depth_probs = depth_probs.reshape(n_samples * self.depth_num, 1, height, width)
-        src_weights = self.upsample(src_weights, size=(iheight, iwidth)).view(n_samples, n_views, self.depth_num, iheight, iwidth)
-        depth_probs = self.upsample(depth_probs, size=(iheight, iwidth)).view(n_samples, self.depth_num, 1, iheight, iwidth)
+        src_weights = functional.interpolate(src_weights, size=(iheight, iwidth), mode='nearest').view(n_samples, n_views, self.depth_num, iheight, iwidth)
+        depth_probs = functional.interpolate(depth_probs, size=(iheight, iwidth), mode='nearest').view(n_samples, self.depth_num, 1, iheight, iwidth)
 
         src_weights_softmax = torch.softmax(src_weights, dim=1)
         depth_prob_volume_softmax = torch.softmax(depth_probs, dim=1)

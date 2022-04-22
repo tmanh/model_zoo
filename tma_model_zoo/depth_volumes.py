@@ -1,10 +1,9 @@
 import numpy as np
-from sklearn.cluster import ward_tree
 
 import torch
 import torch.nn as nn
 
-from .universal.snet import SNetDS2BN_base_8
+from .universal import *
 from .basics.conv_gru import ConvGRU2d
 from .basics.padding import same_padding
 from .basics.geometry import create_sampling_map_target2source, tensor_warping
@@ -58,11 +57,10 @@ class DepthVolume1D(BaseDepthVolumeModel):
 
         self.n_feats = n_feats
 
-        self.cell0 = DynamicConv2d(in_channels=self.n_feats + 2, out_channels=self.n_feats, kernel_size=1, bias=True)
-        # self.cell0 = DynamicConv2d(in_channels=(self.n_feats + 3) * 3, out_channels=self.n_feats, kernel_size=1)
-        self.cell1 = DynamicConv2d(in_channels=self.n_feats - 1, out_channels=1, kernel_size=1, bias=True)
+        self.cell0 = UNet(in_channels=n_feats + 2, enc_channels=[8, 16, 32, 64], dec_channels=[32, 16, 8], n_enc_convs=1, n_dec_convs=1)
+        self.cell1 = DynamicConv2d(in_channels=7, out_channels=1, kernel_size=5, bias=True)
 
-    def forward(self, src_feats, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics, iheight, iwidth, positions=None):
+    def forward(self, src_feats, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics, positions=None):
         n_samples, n_views, _, height, width = src_feats.shape
 
         # sampling_maps: [N, V, D, 2, H, W], view_masks: [N, V, D, 1, H, W]
@@ -73,8 +71,6 @@ class DepthVolume1D(BaseDepthVolumeModel):
         src_weights = []
         depth_probs = []
 
-        n_rays = positions.shape[1] if positions is not None else iheight * iwidth
-
         for d in range(self.depth_num):
             feature_list = []
             for view in range(n_views):
@@ -83,7 +79,7 @@ class DepthVolume1D(BaseDepthVolumeModel):
                 
                 if positions is not None:
                     warped_view_feature = [warped_view_feature[i, :, positions[i, :, 1], positions[i, :, 2]] for i in range(n_samples)]
-                    warped_view_feature = torch.stack(warped_view_feature, dim=0).view(n_samples, -1, 1, n_rays)
+                    warped_view_feature = torch.stack(warped_view_feature, dim=0).view(n_samples, -1, height, width)
 
                 feature_list.append(warped_view_feature)
 
@@ -93,17 +89,12 @@ class DepthVolume1D(BaseDepthVolumeModel):
             view_cost = torch.mean(cost, dim=0, keepdims=True)
             view_cost_mean = torch.mean(view_cost, dim=1, keepdims=True).repeat(1, n_views, 1, 1, 1)
             warped_cost = torch.cat([warped_feats.permute(1, 0, 2, 3, 4), view_cost_mean, view_cost], dim=2)
-
-            # warped_means = torch.mean(warped_feats, dim=0, keepdims=True).repeat([n_views, 1, 1, 1, 1])
-            # warped_vars = torch.var(warped_feats, dim=0, keepdims=True).repeat([n_views, 1, 1, 1, 1])
-            # warped_cost = torch.cat([warped_feats.permute(1, 0, 2, 3, 4), warped_means.permute(1, 0, 2, 3, 4), warped_vars.permute(1, 0, 2, 3, 4)], dim=2)
-            
-            warped_cost = warped_cost.view(n_samples * n_views, -1, 1, n_rays)
+            warped_cost = warped_cost.view(n_samples * n_views, -1, height, width)
 
             feature_out0 = self.cell0(warped_cost)
             
-            src_weight = feature_out0[:, 0, ...].view(n_samples, n_views, 1, n_rays)
-            probs = self.cell1(torch.mean(feature_out0[:, 1:, ...].view(n_samples, n_views, -1, 1, n_rays), dim=1))
+            src_weight = feature_out0[:, 0, ...].view(n_samples, n_views, height, width)
+            probs = self.cell1(torch.mean(feature_out0[:, 1:, ...].view(n_samples, n_views, -1, height, width), dim=1))
 
             src_weights.append(src_weight)
             depth_probs.append(probs)
