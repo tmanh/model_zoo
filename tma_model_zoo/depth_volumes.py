@@ -60,7 +60,7 @@ class DepthVolume1D(BaseDepthVolumeModel):
         self.cell0 = UNet(in_channels=n_feats + 2, enc_channels=[8, 16, 32, 64], dec_channels=[32, 16, 8], n_enc_convs=1, n_dec_convs=1)
         self.cell1 = DynamicConv2d(in_channels=7, out_channels=1, kernel_size=5, bias=True)
 
-    def forward(self, src_feats, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics, positions=None):
+    def forward(self, src_feats, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
         n_samples, n_views, _, height, width = src_feats.shape
 
         # sampling_maps: [N, V, D, 2, H, W], view_masks: [N, V, D, 1, H, W]
@@ -76,11 +76,6 @@ class DepthVolume1D(BaseDepthVolumeModel):
             for view in range(n_views):
                 sampling_map = sampling_maps[:, view, d]
                 warped_view_feature = tensor_warping(src_feats[:, view], sampling_map)
-                
-                if positions is not None:
-                    warped_view_feature = [warped_view_feature[i, :, positions[i, :, 1], positions[i, :, 2]] for i in range(n_samples)]
-                    warped_view_feature = torch.stack(warped_view_feature, dim=0).view(n_samples, -1, height, width)
-
                 feature_list.append(warped_view_feature)
 
             warped_feats = torch.stack(feature_list, dim=0)  # src_features: [V, N, C, H, W]
