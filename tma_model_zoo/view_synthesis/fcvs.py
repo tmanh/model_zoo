@@ -1,6 +1,6 @@
 import itertools
-from turtle import position
-from kornia import tensor_to_image
+import math
+from kornia import depth
 import torch
 import torch.nn as nn
 import torch.nn.functional as functional
@@ -11,6 +11,7 @@ from ..basics.activation import stable_softmax
 from ..basics.dynamic_conv import Deconv, DynamicConv2d
 from ..basics.upsampling import Upsample
 from ..depth_volumes import DepthVolume1D, BaseDepthVolumeModel
+from ..basics.mapnet import ResidualPlusMapNet
 
 
 class FCVS(BaseDepthVolumeModel):
@@ -22,7 +23,20 @@ class FCVS(BaseDepthVolumeModel):
         merge_feats = 64
         act = nn.LeakyReLU(inplace=True)
 
+        # source feats
         self.enc_net = SNetDS2BN_base_8(in_channels=3)
+
+        # depth volume and ray rendering
+        self.depth_volume_model = DepthVolume1D(depth_start=depth_start, depth_end=depth_end, depth_num=depth_num, n_feats=reduce_feats)
+
+        # sr prob maps
+        self.prob_feat_conv = Resnet(in_dim=self.depth_num, n_feats=64, kernel_size=3, n_resblock=4, out_dim=64, tail=True)
+        self.weight_feat_conv = Resnet(in_dim=self.depth_num, n_feats=64, kernel_size=3, n_resblock=4, out_dim=64, tail=True)
+        self.upscale_probs = ResidualPlusMapNet(in_channels=4, n_feats=64, out_channels=48)
+        self.upscale_weights = ResidualPlusMapNet(in_channels=4, n_feats=64, out_channels=48)
+
+        self.freeze_visibility()
+
         self.merge_net = GRUUNet(64 + 4 + 6, enc_channels=[64, 128, 256, 512], dec_channels=[256, 128, 64], n_enc_convs=3, n_dec_convs=3, act=act)
         self.reduce_conv = DynamicConv2d(64, reduce_feats, stride=1)
 
@@ -32,11 +46,30 @@ class FCVS(BaseDepthVolumeModel):
         self.rgb_conv = nn.Conv2d(merge_feats, 3, kernel_size=1, stride=1, padding=0, bias=False)
         self.alpha_conv = nn.Conv2d(merge_feats, 1, kernel_size=1, stride=1, padding=0, bias=False)
 
-        self.depth_volume_model = DepthVolume1D(depth_start=depth_start, depth_end=depth_end, depth_num=depth_num, n_feats=reduce_feats)
-        self.upsample = Upsample(mode='nearest')
-
         self.sheight = 128
         self.swidth = 160
+
+    def freeze_visibility(self):
+        for param in self.enc_net.parameters():
+            param.requires_grad = False
+        for module in self.enc_net.modules():
+            if isinstance(module, nn.BatchNorm2d):
+                if hasattr(module, 'weight'):
+                    module.weight.requires_grad_(False)
+                if hasattr(module, 'bias'):
+                    module.bias.requires_grad_(False)
+                module.momentum = 0
+                module.eval()
+        for param in self.depth_volume_model.parameters():
+            param.requires_grad = False
+        for module in self.enc_net.modules():
+            if isinstance(module, nn.BatchNorm2d):
+                if hasattr(module, 'weight'):
+                    module.weight.requires_grad_(False)
+                if hasattr(module, 'bias'):
+                    module.bias.requires_grad_(False)
+                module.momentum = 0
+                module.eval()
 
     def forward(self, src_colors, prj_depths, sampling_maps, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
         n_samples, n_views, n_channels, height, width = src_colors.shape
@@ -128,7 +161,77 @@ class FCVS(BaseDepthVolumeModel):
         alphas = torch.softmax(torch.stack(alphas), dim=0)
         fused = (alphas * colors).sum(dim=0)
         return fused, colors.permute(1, 0, 2, 3, 4)
-        
+
+    def sr_prob(self, depth_probs, view_weights, original_height, original_width):
+        n_samples, n_views, n_depths, height, width = view_weights.shape
+
+        pos_mat, mapping_mat = self.generate_sr_map(height, width, original_height, original_width, depth_probs.device)
+        pos_mat = pos_mat.view(1, original_height, original_width, pos_mat.shape[2])
+        pos_mat = pos_mat.repeat(n_samples, 1, 1, 1)
+
+        reshaped_probs = depth_probs.view(n_samples, n_depths, height, width)
+        reshape_weights = view_weights.view(n_samples * n_views, n_depths, height, width)
+
+        prob_feature = self.prob_feat_conv(reshaped_probs)
+        weight_feature = self.weight_feat_conv(reshape_weights)
+
+        sr_probs = self.upscale_probs(pos_mat, mapping_mat, prob_feature, reshaped_probs)
+        sr_weights = self.upscale_weights(pos_mat, mapping_mat, weight_feature, reshape_weights)
+
+        return sr_probs.view(n_samples, n_depths, 1, original_height, original_width), sr_weights.view(n_samples, n_views, n_depths, original_height, original_width)
+
+    # by given the scale and the size of input image
+    # we calculate the input matrix for the weight prediction network
+    # input matrix for weight prediction network
+    def generate_sr_map(self, in_h, in_w, out_h, out_w, device, add_scale=True):
+        scale_h = in_h / out_h
+        scale_w = in_w / out_w
+
+        scale_mat_h = None
+        scale_mat_w = None
+
+        if add_scale:
+            scale_mat_h = torch.zeros((1, 1))
+            scale_mat_h[0, 0] = 1.0 / scale_h
+            scale_mat_h = torch.cat([scale_mat_h] * (out_h * out_w), 0)
+
+            scale_mat_w = torch.zeros((1, 1))
+            scale_mat_w[0, 0] = 1.0 / scale_w
+            scale_mat_w = torch.cat([scale_mat_w] * (out_h * out_w), 0)
+
+        # projection coordinate and calculate the offset
+        h_project_coord = torch.mul(torch.arange(0, out_h, 1).float(), scale_h)
+        int_h_project_coord = torch.floor(h_project_coord)
+
+        w_project_coord = torch.mul(torch.arange(0, out_w, 1).float(), scale_w)
+        int_w_project_coord = torch.floor(w_project_coord)
+
+        # set the proper view compute offset
+        offset_h = (h_project_coord - int_h_project_coord).view(out_h, 1).contiguous()
+        int_h_project_coord = int_h_project_coord.long().view(out_h, 1).contiguous()
+
+        offset_w = (w_project_coord - int_w_project_coord).view(out_w, 1).contiguous()
+        int_w_project_coord = int_w_project_coord.long().view(out_w, 1).contiguous()
+
+        # the size is scale_int* inH* (scale_int*inW)
+        offset_h_coord = offset_h.repeat(1, out_w).contiguous().view((-1, out_w, 1))
+        offset_w_coord = offset_w.repeat(1, out_h).contiguous().view((-1, out_h, 1)).permute((1, 0, 2))
+
+        int_h_project_coord_all = int_h_project_coord.repeat(1, out_w).contiguous().view((out_h, out_w, 1))
+        int_w_project_coord_all = int_w_project_coord.repeat(1, out_h).contiguous().view((-1, out_h, 1))
+        int_w_project_coord_all = int_w_project_coord_all.permute((1, 0, 2))
+
+        position_mat = torch.cat((offset_h_coord, offset_w_coord), dim=2)
+        mapping_mat = torch.cat((int_h_project_coord_all.long(), int_w_project_coord_all.long()), dim=2)
+
+        if add_scale:
+            scale_mat_h = scale_mat_h.view((out_h, out_w, 1))
+            scale_mat_w = scale_mat_w.view((out_h, out_w, 1))
+            position_mat = torch.cat((scale_mat_h, scale_mat_w, position_mat), dim=2)
+
+        # out_h * out_w * 2, out_h = scale_int * inH, out_w = scale_int * inW
+        return position_mat.to(device), mapping_mat.to(device)
+
     def ray_rendering(self, src_colors, reduced_feats, original_height, original_width, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
         view_weights, depth_probs = self.compute_probs(src_colors, reduced_feats, original_height, original_width, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics)
         warped_masks, warped_imgs_srcs = self.warp_images(src_colors, original_height, original_width, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics)
@@ -156,10 +259,12 @@ class FCVS(BaseDepthVolumeModel):
     def compute_probs(self, src_colors, reduced_feats, iheight, iwidth, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
         n_samples, n_views, _, height, width = reduced_feats.shape
         coarse_depth_probs, coarse_src_weights = self.coarse_prob_volumes_from(reduced_feats, iheight, iwidth, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics, height, width)
-        depth_probs, src_weights = self.extract_subset_prob_volumes(src_colors, n_samples, n_views, height, width, coarse_depth_probs, coarse_src_weights)
-        depth_probs, src_weights = self.upscale_prob_volumes(iheight, iwidth, n_samples, n_views, height, width, depth_probs, src_weights)
+        depth_probs, view_weights = self.extract_subset_prob_volumes(src_colors, n_samples, n_views, height, width, coarse_depth_probs, coarse_src_weights)
+        
+        depth_probs, view_weights = self.sr_prob(depth_probs, view_weights, iheight, iwidth)
+        # depth_probs, view_weights = self.upscale_prob_volumes(iheight, iwidth, n_samples, n_views, height, width, depth_probs, view_weights)
 
-        view_weights_softmax = torch.softmax(src_weights, dim=1)
+        view_weights_softmax = torch.softmax(view_weights, dim=1)
         depth_prob_volume_softmax = torch.softmax(depth_probs, dim=1)
         return view_weights_softmax, depth_prob_volume_softmax
 
