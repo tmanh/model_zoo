@@ -10,7 +10,7 @@ from ..universal import *
 
 
 class DeformableNetwork(DeformableModule):
-    def __init__(self, n_images=4, n_feats=64, n_channels=4, training=True, freeze_enc=False):
+    def __init__(self, n_images=4, n_feats=64, n_channels=4, training=True, freeze_enc=True):
         super().__init__()
 
         self.training = training
@@ -136,11 +136,13 @@ class DeformableNetwork(DeformableModule):
                 del projected_feats
                 del global_feats
                 del deep_feats
-            
+
             offsets = self.offset_predictor(coarse_feats)
 
             return self.blending(deep_image, valid_mask, offsets, projected_colors, enhanced_colors, n_samples, n_views, height, width)
-        return (deep_image, enhanced_colors.view(n_samples, n_views, -1, height, width)), valid_mask
+
+        return {'refine': deep_image, 'deep_dst_color': None, 'deep_prj_colors': enhanced_colors.view(n_samples, n_views, -1, height, width),
+                'prj_colors': projected_colors.view(n_samples, n_views, -1, height, width), 'dst_color': None, 'valid_mask': valid_mask}
 
     def blending(self, deep_image, valid_mask, offsets, projected_colors, enhanced_colors, n_samples, n_views, height, width):
         weights = torch.softmax(offsets[:, 2:, :, :], dim=0).view(n_samples, n_views, -1, height, width)

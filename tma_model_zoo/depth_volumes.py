@@ -100,6 +100,110 @@ class DepthVolume1D(BaseDepthVolumeModel):
         return depth_probs, src_weights
 
 
+class DepthVolume2DS(BaseDepthVolumeModel):
+    def __init__(self, depth_start, depth_end, depth_num, memory_saving=False, n_feats=32):
+        super().__init__(depth_start, depth_end, depth_num, memory_saving)
+
+        self.n_feats = n_feats
+
+        self.deconv2 = DeconvGroupNorm(4, 3, kernel_size=16, stride=2)
+        self.deconv3 = DeconvGroupNorm(4, 3, kernel_size=16, stride=2)
+
+        self.shallow_feature_extractor = SNetDS2BN_base_8(in_channels=3)
+
+        self.cell0 = ConvGRU2d(in_channels=18, out_channels=8)
+        self.cell1 = ConvGRU2d(in_channels=8, out_channels=4)
+        self.cell2 = ConvGRU2d(in_channels=4, out_channels=4)
+        self.cell3 = ConvGRU2d(in_channels=7, out_channels=4)
+        self.cell4 = ConvGRU2d(in_channels=8, out_channels=4)
+        self.maxpool = torch.nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv3 = DynamicConv2d(in_channels=11, out_channels=9, act=None, batch_norm=False)
+        self.conv4 = DynamicConv2d(in_channels=4, out_channels=1, act=None, batch_norm=False)
+
+    def forward(self, src_feats, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
+        n_samples, n_views, _, height, width = src_feats.shape
+
+        # sampling_maps: [N, V, D, 2, H, W], view_masks: [N, V, D, 1, H, W]
+        sampling_maps, _ = self.compute_sampling_maps(n_samples, n_views, height, width, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics)
+        sampling_maps = sampling_maps.permute(0, 1, 2, 4, 5, 3)
+
+        # forward cost volume
+        src_weights = []
+        depth_probs = []
+
+        initial_state0 = torch.zeros((n_samples * n_views, 8, height, width), device=src_feats.device)
+        initial_state1 = torch.zeros((n_samples * n_views, 4, height // 2, width // 2), device=src_feats.device)
+        initial_state2 = torch.zeros((n_samples * n_views, 4, height // 4, width // 4), device=src_feats.device)
+        initial_state3 = torch.zeros((n_samples * n_views, 4, height // 2, width // 2), device=src_feats.device)
+        initial_state4 = torch.zeros((n_samples, 4, height, width), device=src_feats.device)
+
+        for d in range(self.depth_num):
+            feature_list = []
+            for view in range(n_views):
+                sampling_map = sampling_maps[:, view, d]
+                warped_view_feature = tensor_warping(src_feats[:, view], sampling_map)
+                feature_list.append(warped_view_feature)
+            
+            warped_feats = torch.stack(feature_list, dim=0)  # src_features: [V, N, C, H, W]
+
+            # compute similarity, corresponds to Eq.(5) in the paper
+            # cost: [V, V, N, H, W], view_cost: [1, V, N, H, W]
+            cost = torch.einsum('vcnhw, cmnhw->vmnhw', warped_feats.permute([0,2,1,3,4]), warped_feats.permute([2,0,1,3,4]))
+            view_cost = torch.mean(cost, dim=0, keepdims=True)
+    
+            # Construct input to our Souce-view Visibility Estimation (SVE) module. Corresponds to Eq.(6) in the paper
+            # view_cost_mean: [1, V, N, H, W]
+            view_cost_mean = torch.mean(view_cost, dim=1, keepdims=True).repeat(1, n_views, 1, 1, 1)
+            view_cost = torch.cat([warped_feats.permute(1, 0, 2, 3, 4), view_cost.permute(2, 1, 0, 3, 4), view_cost_mean.permute(2, 1, 0, 3, 4)], dim=2)
+            view_cost = view_cost.view(n_samples * n_views, -1, height, width)
+            
+            # ================ starts Source-view Visibility Estimation (SVE) ===================================
+            feature_out0 = self.cell0(view_cost, initial_state0)
+            initial_state0 = feature_out0
+            feature_out1 = self.maxpool(feature_out0)
+
+            feature_out1 = self.cell1(feature_out1, initial_state1)
+            initial_state1 = feature_out1
+            feature_out2 = self.maxpool(feature_out1)
+
+            feature_out2 = self.cell2(feature_out2, initial_state2)
+            initial_state2 = feature_out2
+            feature_out2 = self.deconv2(feature_out2)
+            feature_out2 = same_padding(feature_out2, feature_out1)
+            feature_out2 = torch.cat([feature_out2, feature_out1], dim=1)
+
+            feature_out3 = self.cell3(feature_out2, initial_state3)
+            initial_state3 = feature_out3
+            feature_out3 = self.deconv3(feature_out3)
+            feature_out3 = same_padding(feature_out3, feature_out0)
+            feature_out3 = torch.cat([feature_out3, feature_out0], dim=1)
+            feature_out3 = self.conv3(feature_out3)
+                
+            # ================ ends Source-view Visibility Estimation (SVE) ===================================
+            # process output:
+            feature_out3 = feature_out3.view(n_samples, n_views, 9, height, width)
+            src_weight = feature_out3[:, :, 0, ...]
+            # The first output channel is to compute the source view visibility (ie, weight)
+            feature_out3 = torch.mean(feature_out3[:, :, 1:, ...], dim=1)
+            # The last eight channels are used to compute the consensus volume
+            # Correspoding to Eq.(7) in the paper
+
+            # ================ starts Soft Ray-Casting (SRC) ========================
+            feature_out4 = self.cell4(feature_out3, initial_state4)
+            initial_state4 = feature_out4
+            features = self.conv4(feature_out4)
+            # ================ ends Soft Ray-Casting (SRC) ==========================
+
+            src_weights.append(src_weight)
+            depth_probs.append(features)
+
+        src_weights = torch.stack(src_weights, dim=0).permute(1, 2, 0, 3, 4)  # [N, V, D, H, W]
+        depth_probs = torch.stack(depth_probs, dim=1)  # [N, D, 1, H, W]
+
+        return depth_probs, src_weights
+
+
 class DepthVolume2D(BaseDepthVolumeModel):
     def __init__(self, depth_start, depth_end, depth_num, memory_saving=True):
         super().__init__(depth_start, depth_end, depth_num, memory_saving)
