@@ -7,7 +7,7 @@ from ..basics.dynamic_conv import DynamicConv2d
 class ResBlock(nn.Module):
     def __init__(self, conv, n_feats, kernel_size, bias=True, act=nn.ReLU(inplace=True), batch_norm=False):
         super().__init__()
-        self.body = nn.Sequential(*[conv(n_feats, n_feats, kernel_size, bias=bias, act=None, batch_norm=batch_norm), act,
+        self.body = nn.Sequential(*[conv(n_feats, n_feats, kernel_size, bias=bias, act=act, batch_norm=batch_norm),
                                     conv(n_feats, n_feats, kernel_size, bias=bias, act=None, batch_norm=batch_norm)])
 
     def forward(self, x):
@@ -28,7 +28,7 @@ class Resnet(nn.Module):
 
         self.tail = None
         if tail:
-            self.tail = DynamicConv2d(n_feats, out_dim, kernel_size, batch_norm=batch_norm)
+            self.tail = DynamicConv2d(n_feats, out_dim, kernel_size, batch_norm=batch_norm, act=None)
 
     def forward(self, x):
         shallow = self.head(x)

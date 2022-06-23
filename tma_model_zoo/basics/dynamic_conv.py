@@ -20,12 +20,16 @@ class GatingConv2d(SamePaddingConv2d):
 
 
 class SamePaddingConv2dBlock(nn.Module):
-    def __init__(self, in_channel, out_channel, kernel_size=3, stride=1, act=nn.ReLU(inplace=True)):
+    def __init__(self, in_channel, out_channel, kernel_size=3, stride=1, act=nn.ReLU(inplace=True), bias=False, batch_norm=False):
         super().__init__()
-        self.layers = nn.Sequential(nn.Conv2d(in_channel, out_channel, kernel_size, stride=stride, padding=kernel_size // 2, bias=False), act)
+        self.conv = nn.Conv2d(in_channel, out_channel, kernel_size, stride=stride, padding=kernel_size // 2, bias=bias)
+        self.act = act
 
     def forward(self, x):
-        return self.layers(x)
+        out = self.conv(x)
+        if self.act:
+            out = self.act(out)
+        return out
 
 
 class SamePaddingNormConv2dBlock(nn.Module):
@@ -39,9 +43,11 @@ class SamePaddingNormConv2dBlock(nn.Module):
 
 
 class DynamicConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, dilation=1, batch_norm=True, act=nn.ReLU(inplace=True), bias=False):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, dilation=1, groups=1,
+                 batch_norm=True, act=nn.ReLU(inplace=True), bias=False):
         super().__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=int(dilation * (kernel_size - 1) / 2), dilation=dilation, bias=bias)
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, groups=groups,
+                              padding=int(dilation * (kernel_size - 1) / 2), dilation=dilation, bias=bias)
         self.act = act
         self.bn = nn.BatchNorm2d(out_channels) if batch_norm else None
 
@@ -52,6 +58,28 @@ class DynamicConv2d(nn.Module):
         if self.act is not None:
             x = self.act(x)
         return x
+
+
+class SingleGatingConv2d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, dilation=1, groups=1,
+                 batch_norm=True, act=nn.ReLU(inplace=True), bias=False):
+        super().__init__()
+
+        self.conv = nn.Conv2d(in_channels, out_channels + 1, kernel_size, stride=stride, groups=groups,
+                              padding=int(dilation * (kernel_size - 1) / 2), dilation=dilation, bias=bias)
+        self.act = act
+        self.bn = nn.BatchNorm2d(out_channels) if batch_norm else None
+
+    def forward(self, x):
+        x = self.conv(x)
+
+        gated = x[:, :-1, :, :] * torch.sigmoid(x[:, -1:, :, :])
+
+        if self.bn is not None:
+            gated = self.bn(gated)
+        if self.act is not None:
+            gated = self.act(gated)
+        return gated
 
 
 class UpConv(nn.Module):

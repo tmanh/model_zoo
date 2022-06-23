@@ -42,8 +42,8 @@ class BaseUNet(nn.Module):
         if stride > 1:
             mods.append(nn.AvgPool2d(kernel_size=2))
         for _ in range(n_convs):
-            mods.append(self.conv(in_channels, channels_out, kernel_size=3, padding=1, bias=False))
-            mods.append(self.act)
+            mods.extend((self.conv(in_channels, channels_out, kernel_size=3, padding=1, bias=False), self.act))
+
             in_channels = channels_out
             stride = 1
         return nn.Sequential(*mods)

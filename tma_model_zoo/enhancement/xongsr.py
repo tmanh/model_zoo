@@ -2,9 +2,9 @@
 import time
 import torch
 import torch.nn as nn
+import torch.nn.functional as functional
 
 from tma_model_zoo.basics.dynamic_conv import SamePaddingConv2dBlock
-from tma_model_zoo.universal.resnet import ResBlock
 
 
 class BaseNet(nn.Module):
@@ -20,33 +20,32 @@ class BaseNet(nn.Module):
         pass
 
 
+class VDSR(nn.Module):
+    def __init__(self, in_channels):
+        super().__init__()
+
+        self.conv1 = SamePaddingConv2dBlock(in_channels, 64, 3)
+        self.conv2 = nn.Sequential(*[SamePaddingConv2dBlock(64, 64, 3) for _ in range(18)])
+        self.conv3 = SamePaddingConv2dBlock(64, 1, 3, act=None)
+
+    def forward(self, x):
+        identity = x
+        out = self.conv3(self.conv2(self.conv1(x)))
+        return out + identity
+
+
 # https://arxiv.org/pdf/1808.08688.pdf
 class XongSR(BaseNet):
     def __init__(self, device, n_feats, n_resblock, act):
         super().__init__(device, n_feats, n_resblock, act)
 
-        self.dcnn1 = [SamePaddingConv2dBlock(1, n_feats, 3)]
-        self.dcnn1.extend([ResBlock(SamePaddingConv2dBlock, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
-        self.dcnn1.append(SamePaddingConv2dBlock(n_feats, 1, 3))
-        self.dcnn1 = nn.Sequential(*self.dcnn1)
-
-        self.dcnn2 = [SamePaddingConv2dBlock(1, n_feats, 3)]
-        self.dcnn2.extend([ResBlock(SamePaddingConv2dBlock, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
-        self.dcnn2.append(SamePaddingConv2dBlock(n_feats, 1, 3))
-        self.dcnn2 = nn.Sequential(*self.dcnn2)
-
-        self.dcnn3 = [SamePaddingConv2dBlock(1, n_feats, 3)]
-        self.dcnn3.extend([ResBlock(SamePaddingConv2dBlock, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
-        self.dcnn3.append(SamePaddingConv2dBlock(n_feats, 1, 3))
-        self.dcnn3 = nn.Sequential(*self.dcnn3)
-
-        self.dcnn4 = [SamePaddingConv2dBlock(1, n_feats, 3)]
-        self.dcnn4.extend([ResBlock(SamePaddingConv2dBlock, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
-        self.dcnn4.append(SamePaddingConv2dBlock(n_feats, 1, 3))
-        self.dcnn4 = nn.Sequential(*self.dcnn4)
+        self.dcnn1 = VDSR(1)
+        self.dcnn2 = VDSR(1)
+        self.dcnn3 = VDSR(1)
+        self.dcnn4 = VDSR(1)
 
     def forward(self, depth_lr):
-        n_samples, n_feats, height, width = depth_lr.size()
+        n_samples, n_feats, height, width = depth_lr.shape
 
         x1 = self.dcnn1(depth_lr).view((n_samples, n_feats, 1, height, width))
         x2 = self.dcnn2(depth_lr).view((n_samples, n_feats, 1, height, width))
@@ -65,33 +64,31 @@ class XongMSR(BaseNet):
 
         self.sr = XongSR(device, n_feats, n_resblock, act)
 
-        dcnn_x4 = [SamePaddingConv2dBlock(2, n_feats, 3)]
-        dcnn_x4.extend([ResBlock(SamePaddingConv2dBlock, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
-        dcnn_x4.append(SamePaddingConv2dBlock(n_feats, 1, 3))
-        dcnn_x4 = nn.Sequential(*dcnn_x4)
-
-        dcnn_x2 = [SamePaddingConv2dBlock(1, n_feats, 3)]
-        dcnn_x2.extend([ResBlock(SamePaddingConv2dBlock, n_feats, 3, act=nn.ReLU(inplace=True)) for _ in range(n_resblock)])
-        dcnn_x2.append(SamePaddingConv2dBlock(n_feats, 1, 3))
-        dcnn_x2 = nn.Sequential(*dcnn_x2)
+        dcnn_x4 = VDSR(1)
+        dcnn_x2 = VDSR(1)
 
         self.dcnn = nn.ModuleList([dcnn_x2, dcnn_x4])
 
-    def forward(self, depth_lr, color_hr, scale):
+    def forward(self, depth_lr, color_hr):
         ttt = time.time()
         _, _, out_height, out_width = color_hr.size()
 
         list_coarse = []
         prev = depth_lr
-        for i in range(self.dcnn):
-            curr = self.sr(prev)
-            if i > 0:
-                curr = torch.cat([curr, prev])
+        if color_hr.shape[-1] / prev.shape[-1] > 1.0:
+            for i in range(len(self.dcnn)):
+                if i==0 or curr.shape[-1] < color_hr.shape[-1]:
+                    curr = self.sr(prev)
+                    if i > 0:
+                        up = functional.interpolate(prev, size=curr.shape[-2:], mode='bicubic', align_corners=True)
+                        curr = (curr + up) / 2
 
-            prev = self.dcnn[i](curr)
-            list_coarse.append(prev)
-        
-        output = torch.nn.functional.interpolate(prev, size=(out_height, out_width), mode='bicubic')
+                    prev = self.dcnn[i](curr)
+                    list_coarse.append(prev)
+
+        output = prev
+        if prev.shape[-2] != out_height and prev.shape[-1] != out_width:
+            output = torch.nn.functional.interpolate(prev, size=(out_height, out_width), mode='bicubic', align_corners=True)
 
         elapsed = time.time() - ttt
 

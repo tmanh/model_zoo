@@ -198,7 +198,10 @@ class VGGPerceptualLoss(nn.Module):
         else:
             self.vgg = torchvision.models.vgg16(pretrained=True).features
 
-    def forward(self, es, ta):
+    def forward(self, tensors):
+        es = tensors['coarse']
+        ta = tensors['dst_color']
+
         self.vgg = self.vgg.to(es.device)
         self.mean = self.mean.to(es.device)
         self.std = self.std.to(es.device)
@@ -219,7 +222,6 @@ class VGGPerceptualLoss(nn.Module):
 
             if midx in [3, 8, 15, 22]:
                 loss += torch.abs(es - ta).mean()
-
         return loss
 
     def compute_loss_vgg19(self, es, ta):
@@ -242,5 +244,4 @@ class VGGPerceptualLoss(nn.Module):
             elif midx == 8:
                 lam = 0.75
                 loss += torch.abs(es - ta).mean() * lam
-
         return loss

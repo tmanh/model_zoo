@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.optim as optim
 import torch.optim.lr_scheduler as lrs
@@ -41,8 +42,8 @@ def make_optimizer(args, target):
         kwargs_scheduler = {'lr_lambda': args.lambda_funcs, 'gamma': args.gamma}
         scheduler_class = lrs.LambdaLR
     elif args.decay_type == 'cosine':
-        kwargs_scheduler = {'T_max': args.T_max, 'eta_min': args.eta_min}
-        scheduler_class = lrs.CosineAnnealingLR
+        kwargs_scheduler = {'T_0': args.T_0}
+        scheduler_class = lrs.CosineAnnealingWarmRestarts
     elif args.decay_type == 'reduce':
         kwargs_scheduler = {'reduce_mode': args.reduce_mode, 'factor': args.factor, 'patience': args.patience}
         scheduler_class = lrs.ReduceLROnPlateau

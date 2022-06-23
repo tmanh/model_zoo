@@ -16,7 +16,9 @@ class Adversarial(nn.Module):
 
         self.optimizer = make_optimizer(args, self.local_discriminator)
 
-    def forward(self, fake, real):
+    def forward(self, tensors):
+        fake, real = tensors['refine'], tensors['gt_depth_hr']
+
         # Discriminator update
         self.optimizer.zero_grad()
 
@@ -66,10 +68,10 @@ class Adversarial(nn.Module):
 
 
 class LocalDiscriminator(nn.Module):
-    def __init__(self, ndf = 64):
+    def __init__(self, ndf=64):
         super().__init__()
 
-        self.conv1 = DynamicConv2d(3, ndf, stride=2, act=nn.LeakyReLU(inplace=True))
+        self.conv1 = DynamicConv2d(1, ndf, stride=2, act=nn.LeakyReLU(inplace=True))
         self.conv2 = DynamicConv2d(ndf * 1, ndf * 2, stride=2, act=nn.LeakyReLU(inplace=True))
         self.conv3 = DynamicConv2d(ndf * 2, ndf * 4, stride=2, act=nn.LeakyReLU(inplace=True))
         self.conv4 = DynamicConv2d(ndf * 4, ndf * 8, stride=1, act=nn.LeakyReLU(inplace=True))

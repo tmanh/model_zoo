@@ -14,7 +14,7 @@ if sys.argv[-1] == 'publish':
         os.system('rm -rf dist model_zoo_pytorch.egg-info')
     sys.exit()
 
-install_requires = ['torch>=1.8.1']
+install_requires = []  # 'torch>=1.8.1'
 
 setup(
     name='tma_model_zoo',
@@ -26,5 +26,5 @@ setup(
     include_package_data=True,
     zip_safe=False,
     install_requires=install_requires,
-    python_requires='>=3.8.10'
+    python_requires='>=3.7.0'
 )

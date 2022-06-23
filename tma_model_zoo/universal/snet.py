@@ -6,10 +6,13 @@ from ..basics.dynamic_conv import DynamicConv2d
 
 class SNetDS2BN_base_8(nn.Module):
     """2D U-Net with group normalization."""
-    def __init__(self, in_channels):
+    def __init__(self, in_channels, out_channels=None, base_channels=8):
         super().__init__()
 
-        self.base_channels = 8
+        self.base_channels = base_channels
+        if out_channels is None:
+            out_channels = self.base_channels * 2
+
         self.conv11 = DynamicConv2d(in_channels, self.base_channels * 1, dilation=1, act=nn.ReLU(inplace=True))
         self.conv12 = DynamicConv2d(self.base_channels * 1, self.base_channels * 2, dilation=1, act=nn.ReLU(inplace=True))
         self.conv13 = DynamicConv2d(self.base_channels * 2, self.base_channels * 2, dilation=2, act=nn.ReLU(inplace=True))
@@ -21,7 +24,7 @@ class SNetDS2BN_base_8(nn.Module):
         self.conv31 = DynamicConv2d(self.base_channels * 2, self.base_channels * 2, dilation=4, act=nn.ReLU(inplace=True))
         self.conv32 = DynamicConv2d(self.base_channels * 2, self.base_channels * 2, dilation=1, act=nn.ReLU(inplace=True))
 
-        self.out_conv = DynamicConv2d(self.base_channels * 6, self.base_channels * 2, dilation=1, batch_norm=False, act=None)
+        self.out_conv = DynamicConv2d(self.base_channels * 6, out_channels, dilation=1, batch_norm=False, act=None)
 
     def forward(self, x):
         x11 = self.conv11(x)

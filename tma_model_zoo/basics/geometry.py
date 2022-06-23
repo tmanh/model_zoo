@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as functional
 
 
@@ -76,3 +77,44 @@ def tensor_warping(input_image, sampling_map, mode='bilinear'):
         padding_mode='zeros',
         align_corners=True,
     )
+
+
+class BackReprojection(nn.Module):
+    @staticmethod
+    def create_loc_matrix(depth_value):
+        device = depth_value.device
+        height, width = depth_value.shape[-2:]
+
+        x = torch.linspace(start=0.0, end=width-1, steps=width, device=device)
+        y = torch.linspace(start=0.0, end=height-1, steps=height, device=device)
+
+        # Create H x W grids
+        y, x = torch.meshgrid(y, x)
+        
+        x = x.view(1, height, width)
+        y = y.view(1, height, width)
+        z = depth_value.view(1, height, width)
+        o = torch.ones_like(y)
+
+        return torch.cat([x * z, y * z, z, o], dim=0).view((4, -1))
+
+    def forward(self, src_depth, src_intrinsic, src_extrinsic, dst_intrinsic, dst_extrinsic):
+        height, width = src_depth.shape[-2:]
+
+        pos_matrix = self.compute_pos_matrix(src_depth, src_intrinsic, src_extrinsic, dst_intrinsic, dst_extrinsic, height, width)
+
+        sampling_map = (pos_matrix[:2, :, :] / (pos_matrix[2:3, :, :] + 1e-7)).reshape((1, 2, height, width))
+        sampling_map = sampling_map.permute((0, 2, 3, 1))
+
+        sampling_map[:, :, :, 0:1] = sampling_map[:, :, :, 0:1] / (width / 2) - 1
+        sampling_map[:, :, :, 1:2] = sampling_map[:, :, :, 1:2] / (height / 2) - 1
+
+        return sampling_map
+
+    def compute_pos_matrix(self, src_depth, src_intrinsic, src_extrinsic, dst_intrinsic, dst_extrinsic, height, width):
+        # compute location matrix
+        pos_matrix = BackReprojection.create_loc_matrix(src_depth).reshape(4, -1)
+        pos_matrix = torch.linalg.inv((src_intrinsic @ src_extrinsic)) @ pos_matrix
+        pos_matrix = dst_intrinsic @ dst_extrinsic @ pos_matrix
+        pos_matrix = pos_matrix.reshape((4, height, width))
+        return pos_matrix

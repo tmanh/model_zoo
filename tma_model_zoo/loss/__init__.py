@@ -17,7 +17,8 @@ class Loss(nn.modules.loss._Loss):
         self.generate_loss_modules(args)
 
         device = torch.device('cpu' if args.cpu else 'cuda')
-        self.log = np.zeros(len(self.loss))
+        self.log = np.zeros(len(self.loss) + 2)
+        self.last_loss = 1e8
         self.loss_module.to(device)
 
         if not args.cpu and args.n_gpus > 1:
@@ -37,6 +38,8 @@ class Loss(nn.modules.loss._Loss):
                 loss_function = ProjectionLoss()
             elif loss_type == 'VGG':
                 loss_function = VGGPerceptualLoss(args.mode)
+            elif loss_type == 'SR':
+                loss_function = DSRLoss()
             else:
                 loss_function = Adversarial(args)
             
@@ -63,33 +66,26 @@ class Loss(nn.modules.loss._Loss):
 
         for i, l in enumerate(self.loss):
             effective_loss = 0
-            if l['type'] in ['GAN', 'VGG']:
-                if 'refine' in tensors.keys() and tensors['refine'] is not None:
-                    loss = l['function'](tensors['refine'], tensors['dst_color'])
-                elif 'deep_dst_color' in tensors.keys() and tensors['deep_dst_color'] is not None:
-                    loss = l['function'](tensors['deep_dst_color'], tensors['dst_color'])
-                else:
-                    loss = l['function'](tensors['output'], tensors['dst_color'])
-            elif l['type'] in ['PRJ']:
+            if l['type'] not in ['DIS', 'Total']:
                 loss = l['function'](tensors)
-            elif l['type'] not in ['Total', 'DIS']:
-                loss = l['function'](tensors['refine'], tensors['deep_dst_color'], tensors['deep_prj_colors'], tensors['prj_colors'], tensors['dst_color'])
-            effective_loss = l['weight'] * loss
+                effective_loss = l['weight'] * loss
 
             if l['type'] == 'GAN':
                 self.log[i + 1] += (l['function'].loss_d * loss).detach().cpu().numpy()
-            
-            if not isinstance(effective_loss, int):
+
+            if not isinstance(effective_loss, int) and not isinstance(effective_loss, float):
                 self.log[i] += effective_loss.detach().cpu().numpy()
 
             total_loss += effective_loss
+
+        self.last_loss = total_loss.detach().cpu().numpy()
 
         self.log[-1] += total_loss.detach().cpu().numpy()
 
         return total_loss
 
     def reset_log(self):
-        self.log = np.zeros(len(self.loss))
+        self.log = np.zeros(len(self.loss) + 2)
 
     def step(self):
         for loss in self.get_loss_module():
