@@ -3,7 +3,7 @@ import torch.nn as nn
 
 from .efficient import MBConvBlock
 from .efficient_utils import GlobalParams, BlockDecoder
-from ..basics.upsampling import Upsample
+from ..basics.upsampling import Upscale
 
 
 class EfficientUnet(nn.Module):
@@ -36,7 +36,7 @@ class EfficientUnet(nn.Module):
         self.uppers = self.init_blocks(self.upper_codes)
         self.decoders = self.init_blocks(self.decoder_codes)
         
-        self.upscale = Upsample(scale_factor=2, mode='bilinear')
+        self.upscale = Upscale(scale_factor=2, mode='bilinear')
 
     def forward(self, x):
         # encode => bottleneck => decode
@@ -150,7 +150,7 @@ class EfficientGRUnet(nn.Module):
         self.decoders = None
         self.init_decoders()
         
-        self.upscale = Upsample(scale_factor=2, mode='bilinear')
+        self.upscale = Upscale(scale_factor=2, mode='bilinear')
 
     def forward(self, x, he, hd):
         # encode => bottleneck => decode

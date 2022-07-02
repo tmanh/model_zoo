@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from tma_model_zoo.basics.dynamic_conv import DynamicConv2d
-from tma_model_zoo.basics.upsampling import Upsample
+from tma_model_zoo.basics.upsampling import Upscale
 from tma_model_zoo.universal.efficient import EfficientNet
 from tma_model_zoo.universal.resnet import Resnet
 
@@ -13,13 +13,13 @@ class ConvBlock(nn.Module):
     def __init__(self, input_channel, output_channel, act=nn.LeakyReLU(inplace=True), down_size=True):
         super().__init__()
 
-        self.conv1 = DynamicConv2d(input_channel, output_channel, 3, act=act, batch_norm=False)
-        self.conv2 = DynamicConv2d(output_channel, output_channel, 3, act=act, batch_norm=False)
+        self.conv1 = DynamicConv2d(input_channel, output_channel, 3, act=act, norm_cfg=None)
+        self.conv2 = DynamicConv2d(output_channel, output_channel, 3, act=act, norm_cfg=None)
 
         if down_size:
-            self.conv3 = DynamicConv2d(output_channel, output_channel, 3, stride=2, act=act, batch_norm=False)
+            self.conv3 = DynamicConv2d(output_channel, output_channel, 3, stride=2, act=act, norm_cfg=None)
         else:
-            self.conv3 = DynamicConv2d(output_channel, output_channel, 3, act=act, batch_norm=False)
+            self.conv3 = DynamicConv2d(output_channel, output_channel, 3, act=act, norm_cfg=None)
 
         self.down_size = down_size
 
@@ -93,13 +93,7 @@ class UnetAttentionDownBLock(nn.Module):
         self.encoders = nn.ModuleList(*self.encoders)
 
         self.attentions = [
-            DynamicConv2d(
-                in_channel,
-                out_channel,
-                batch_norm=False,
-                act=nn.LeakyReLU(inplace=True),
-            )
-            for in_channel, out_channel in zip(att_in_channels, enc_out_channels)
+            DynamicConv2d(in_channel, out_channel, norm_cfg=None, act=nn.LeakyReLU(inplace=True)) for in_channel, out_channel in zip(att_in_channels, enc_out_channels)
         ]
 
         self.attentions = nn.ModuleList(*self.attentions)
@@ -138,17 +132,17 @@ class GuidedUnet(nn.Module):
         # mask
         self.mask_conv = UnetDownBLock(enc_in_channels=depth_enc_in_channels, enc_out_channels=enc_out_channels)
 
-        self.feature_net = DynamicConv2d(16, 64, 3, act=None, batch_norm=False)
+        self.feature_net = DynamicConv2d(16, 64, 3, act=None, norm_cfg=None)
         self.last_conv1 = nn.Conv2d(16, 16, 3, padding=1)
         self.last_conv2 = nn.Conv2d(16, 1, 1, padding=0)
         self.act = nn.ReLU()
 
-        self.upscale = Upsample()
+        self.upscale = Upscale()
 
     def create_bottleneck(self):
-        return nn.Sequential(*[DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), batch_norm=False),
-                               DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), batch_norm=False),
-                               DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), batch_norm=False)])
+        return nn.Sequential(*[DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), norm_cfg=None),
+                               DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), norm_cfg=None),
+                               DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), norm_cfg=None)])
 
     def forward(self, color, depth, mask):
         m_feats = self.mask_conv(mask)
@@ -197,8 +191,8 @@ class GuidedEfficientNet(nn.Module):
 
         self.depth_conv = Resnet(1, n_feats, 3, n_resblocks, n_feats, act)
 
-        self.alphas = nn.ModuleList([DynamicConv2d(i, n_feats, batch_norm=False, act=act) for i in enc_in_channels][::-1])
-        self.betas = nn.ModuleList([DynamicConv2d(i, n_feats, batch_norm=False, act=act) for i in enc_in_channels][::-1])
+        self.alphas = nn.ModuleList([DynamicConv2d(i, n_feats, norm_cfg=None, act=act) for i in enc_in_channels][::-1])
+        self.betas = nn.ModuleList([DynamicConv2d(i, n_feats, norm_cfg=None, act=act) for i in enc_in_channels][::-1])
         self.downs = nn.ModuleList([ConvBlock(n_feats, n_feats) for _ in enc_in_channels])
         self.ups = nn.ModuleList([ConvBlock(n_feats, n_feats, down_size=False) for _ in enc_in_channels])
 
@@ -208,8 +202,8 @@ class GuidedEfficientNet(nn.Module):
             self.min_d, self.max_d = 0.5, 10
             self.softmax = nn.Softmax(dim=1)
 
-        self.out_net = DynamicConv2d(n_feats, self.n_output, batch_norm=False, act=act)
-        self.upscale = Upsample(mode='bilinear')
+        self.out_net = DynamicConv2d(n_feats, self.n_output, norm_cfg=None, act=act)
+        self.upscale = Upscale(mode='bilinear')
 
         if 'efficient-rgb-m' in self.mode:
             mask_in_channels = [mask_channels, *enc_in_channels[:-1]]

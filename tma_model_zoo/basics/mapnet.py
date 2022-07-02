@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as functional
 
-from .. basics.dynamic_conv import DynamicConv2d
-
 
 class ProjectLayer(nn.Module):
     def __init__(self):

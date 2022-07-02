@@ -121,8 +121,8 @@ class RefinementNetwork(nn.Module):
         return nn.ModuleList([
             nn.Sequential(
                 *[
-                    DynamicConv2d(out_channels, out_channels // 2, batch_norm=False, act=act),
-                    DynamicConv2d(out_channels // 2, 1, batch_norm=False, act=nn.Sigmoid()),
+                    DynamicConv2d(out_channels, out_channels // 2, norm_cfg=None, act=act),
+                    DynamicConv2d(out_channels // 2, 1, norm_cfg=None, act=nn.Sigmoid()),
                 ]
             )
             for out_channels in layer_specs
@@ -130,11 +130,11 @@ class RefinementNetwork(nn.Module):
 
     @staticmethod
     def generate_layers(n_channels, layer_specs, act):
-        layers = [DynamicConv2d(3, n_channels, kernel_size=4, stride=1, batch_norm=False, act=act,)]
+        layers = [DynamicConv2d(3, n_channels, kernel_size=4, stride=1, norm_cfg=None, act=act,)]
 
         in_channels = n_channels
         for out_channels in layer_specs:
-            layers.append(DynamicConv2d(in_channels, out_channels, kernel_size=4, stride=2, batch_norm=False, act=act))
+            layers.append(DynamicConv2d(in_channels, out_channels, kernel_size=4, stride=2, norm_cfg=None, act=act))
             in_channels = out_channels
 
         return nn.ModuleList(layers)
@@ -158,7 +158,7 @@ class RefinementNetwork(nn.Module):
         ]
 
         return nn.ModuleList([
-            Deconv(input_layer_specs[i], out_channels, kernel_size=3, stride=1, batch_norm=False, p_dropout=dropout, act=act)
+            Deconv(input_layer_specs[i], out_channels, kernel_size=3, stride=1, norm_cfg=None, p_dropout=dropout, act=act)
             for i, (out_channels, dropout) in enumerate(decode_layer_specs)
         ])
 

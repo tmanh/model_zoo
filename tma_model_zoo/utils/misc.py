@@ -37,3 +37,9 @@ def tensor2image(input_tensor, min_value, max_value):
     if channels == 1:
         return image.view(height, width).detach().cpu().numpy().astype(np.uint8)
     return image.permute(1, 2, 0).view(height, width, channels).detach().cpu().numpy().astype(np.uint8)
+
+
+def is_power_of_2(n):
+    if (not isinstance(n, int)) or (n < 0):
+        raise ValueError(f'invalid input for is_power_of_2: {n} (type: {type(n)})')
+    return (n & (n - 1) == 0) and n != 0

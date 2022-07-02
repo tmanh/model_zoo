@@ -1,55 +1,24 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as functional
 
-
-class SamePaddingConv2d(nn.Conv2d):
-    """2D Convolutions like TensorFlow, for a dynamic image size.
-       The padding is operated in forward function by calculating dynamically.
-    """
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=1, dilation=1, groups=1, bias=True):
-        super().__init__(in_channels, out_channels, kernel_size, stride, kernel_size // 2, dilation, groups, bias)
-
-
-class GatingConv2d(SamePaddingConv2d):
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=1, dilation=1, groups=1, bias=True):
-        super().__init__(in_channels, out_channels+1, kernel_size, stride, kernel_size // 2, dilation, groups, bias)
-
-    def forward(self, x):
-        x = super().forward(x)
-        return torch.sigmoid(x[:, -1:, :, :]) * x[:, :-1, :, :]
-
-
-class SamePaddingConv2dBlock(nn.Module):
-    def __init__(self, in_channel, out_channel, kernel_size=3, stride=1, act=nn.ReLU(inplace=True), bias=False, batch_norm=False):
-        super().__init__()
-        self.conv = nn.Conv2d(in_channel, out_channel, kernel_size, stride=stride, padding=kernel_size // 2, bias=bias)
-        self.act = act
-
-    def forward(self, x):
-        out = self.conv(x)
-        if self.act:
-            out = self.act(out)
-        return out
-
-
-class SamePaddingNormConv2dBlock(nn.Module):
-    def __init__(self, in_channel, out_channel, kernel_size=3, stride=1, dilation=1, act=nn.ReLU(inplace=True)):
-        super().__init__()
-        self.layers = nn.Sequential(nn.Conv2d(in_channel, out_channel, kernel_size, stride=stride, padding=int(dilation * (kernel_size - 1) / 2), dilation=dilation, bias=False),
-                                    nn.BatchNorm2d(out_channel), act)
-
-    def forward(self, x):
-        return self.layers(x)
+from .norm import NormBuilder
 
 
 class DynamicConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, dilation=1, groups=1,
-                 batch_norm=True, act=nn.ReLU(inplace=True), bias=False):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, dilation=1, groups=1, norm_cfg='BN2d', act=nn.ReLU(inplace=True), bias=False, requires_grad=True):
         super().__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, groups=groups,
-                              padding=int(dilation * (kernel_size - 1) / 2), dilation=dilation, bias=bias)
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, groups=groups, padding=int(dilation * (kernel_size - 1) / 2), dilation=dilation, bias=bias)
+
         self.act = act
-        self.bn = nn.BatchNorm2d(out_channels) if batch_norm else None
+        
+        if isinstance(norm_cfg, str):  
+            norm_cfg = dict(type=norm_cfg, requires_grad=requires_grad)
+
+        self.bn = NormBuilder.build(cfg=norm_cfg, num_features=out_channels) if norm_cfg else None
+
+        for param in self.conv.parameters():
+            param.requires_grad = requires_grad
 
     def forward(self, x):
         x = self.conv(x)
@@ -60,20 +29,31 @@ class DynamicConv2d(nn.Module):
         return x
 
 
-class SingleGatingConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, dilation=1, groups=1,
-                 batch_norm=True, act=nn.ReLU(inplace=True), bias=False):
+class GatingConv2d(nn.Module):
+    MODES = ['single', 'full']
+
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, dilation=1, groups=1, norm_cfg='BN2d', act=nn.ReLU(inplace=True), bias=False, requires_grad=True, mode='single'):
         super().__init__()
 
-        self.conv = nn.Conv2d(in_channels, out_channels + 1, kernel_size, stride=stride, groups=groups,
-                              padding=int(dilation * (kernel_size - 1) / 2), dilation=dilation, bias=bias)
+        gating_channels = 1 if mode == 'single' else out_channels
+        self.conv = nn.Conv2d(in_channels, out_channels + gating_channels, kernel_size, stride=stride, groups=groups, padding=int(dilation * (kernel_size - 1) / 2), dilation=dilation, bias=bias)
+
         self.act = act
-        self.bn = nn.BatchNorm2d(out_channels) if batch_norm else None
+        
+        if isinstance(norm_cfg, str):  
+            norm_cfg = dict(type=norm_cfg, requires_grad=requires_grad)
+
+        self.bn = NormBuilder.build(cfg=norm_cfg, num_features=out_channels) if norm_cfg else None
+
+        for param in self.conv.parameters():
+            param.requires_grad = requires_grad
+
+        self.out_channels = out_channels
 
     def forward(self, x):
         x = self.conv(x)
 
-        gated = x[:, :-1, :, :] * torch.sigmoid(x[:, -1:, :, :])
+        gated = x[:, :self.out_channels, :, :] * torch.sigmoid(x[:, self.out_channels:, :, :])
 
         if self.bn is not None:
             gated = self.bn(gated)
@@ -82,32 +62,27 @@ class SingleGatingConv2d(nn.Module):
         return gated
 
 
-class UpConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride, act=None, batch_norm=False, p_dropout=0.0):
+class UpSample(nn.Sequential):
+    def __init__(self, skip_input, output_features, conv=DynamicConv2d, norm_cfg=None, act=None, requires_grad=True):
         super().__init__()
+        self.convA = conv(skip_input, output_features, kernel_size=3, stride=1, norm_cfg=norm_cfg, act=act, requires_grad=requires_grad)
+        self.convB = conv(output_features, output_features, kernel_size=3, stride=1, norm_cfg=norm_cfg, act=act, requires_grad=requires_grad)
 
-        # deconvolution
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=kernel_size // 2)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size, stride=stride, padding=kernel_size // 2)
-        self.bn = nn.BatchNorm2d(out_channels) if batch_norm else None
-        self.dropout = nn.Dropout2d(p=p_dropout) if p_dropout > 0 else None
+    def forward(self, x, concat_with):
+        up_x = functional.interpolate(x, size=concat_with.shape[-2:], mode='bilinear', align_corners=True)
+        return self.convB(self.convA(torch.cat([up_x, concat_with], dim=1)))
 
-        # activation
-        self.act = act
+
+    
+class DownSample(nn.Sequential):
+    def __init__(self, in_channels, out_channels, conv=DynamicConv2d, norm_cfg=None, act=None, requires_grad=True):
+        super().__init__()
+        self.convA = conv(in_channels, out_channels, kernel_size=3, stride=2, norm_cfg=norm_cfg, act=act, requires_grad=requires_grad)
+        self.convB = conv(out_channels, out_channels, kernel_size=3, stride=1, norm_cfg=norm_cfg, act=act, requires_grad=requires_grad)
 
     def forward(self, x):
-        x = self.conv1(x)
-        if self.act is not None:
-            x = self.act(x)
+        return self.convB(self.convA(x))
 
-        x = nn.functional.interpolate(x, scale_factor=2, mode='nearest')
-        
-        x = self.conv2(x)
-        if self.bn is not None:
-            x = self.bn(x)
-        if self.act is not None:
-            x = self.act(x)
-        return x
 
 
 class Deconv(nn.Module):

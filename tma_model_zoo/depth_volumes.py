@@ -118,8 +118,8 @@ class DepthVolume2DS(BaseDepthVolumeModel):
         self.cell4 = ConvGRU2d(in_channels=8, out_channels=4)
         self.maxpool = torch.nn.MaxPool2d(kernel_size=2, stride=2)
 
-        self.conv3 = DynamicConv2d(in_channels=11, out_channels=9, act=None, batch_norm=False)
-        self.conv4 = DynamicConv2d(in_channels=4, out_channels=1, act=None, batch_norm=False)
+        self.conv3 = DynamicConv2d(in_channels=11, out_channels=9, act=None, norm_cfg=None)
+        self.conv4 = DynamicConv2d(in_channels=4, out_channels=1, act=None, norm_cfg=None)
 
     def forward(self, src_feats, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
         n_samples, n_views, _, height, width = src_feats.shape
@@ -220,8 +220,8 @@ class DepthVolume2D(BaseDepthVolumeModel):
         self.cell4 = ConvGRU2d(in_channels=8, out_channels=4)
         self.maxpool = torch.nn.MaxPool2d(kernel_size=2, stride=2)
 
-        self.conv3 = DynamicConv2d(in_channels=11, out_channels=9, act=None, batch_norm=False)
-        self.conv4 = DynamicConv2d(in_channels=4, out_channels=1, act=None, batch_norm=False)
+        self.conv3 = DynamicConv2d(in_channels=11, out_channels=9, act=None, norm_cfg=None)
+        self.conv4 = DynamicConv2d(in_channels=4, out_channels=1, act=None, norm_cfg=None)
 
     def forward(self, src_images, dst_intrinsics, dst_extrinsics, src_intrinsics, src_extrinsics):
         n_samples, n_views, n_channels, height, width = src_images.shape

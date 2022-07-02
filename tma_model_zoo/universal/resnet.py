@@ -5,10 +5,10 @@ from ..basics.dynamic_conv import DynamicConv2d
 
 
 class ResBlock(nn.Module):
-    def __init__(self, conv, n_feats, kernel_size, bias=True, act=nn.ReLU(inplace=True), batch_norm=False):
+    def __init__(self, conv, n_feats, kernel_size, bias=True, act=nn.ReLU(inplace=True), norm_cfg=None):
         super().__init__()
-        self.body = nn.Sequential(*[conv(n_feats, n_feats, kernel_size, bias=bias, act=act, batch_norm=batch_norm),
-                                    conv(n_feats, n_feats, kernel_size, bias=bias, act=None, batch_norm=batch_norm)])
+        self.body = nn.Sequential(*[conv(n_feats, n_feats, kernel_size, bias=bias, act=act, norm_cfg=norm_cfg),
+                                    conv(n_feats, n_feats, kernel_size, bias=bias, act=None, norm_cfg=norm_cfg)])
 
     def forward(self, x):
         res = self.body(x)
@@ -18,17 +18,17 @@ class ResBlock(nn.Module):
 
 
 class Resnet(nn.Module):
-    def __init__(self, in_dim, n_feats, kernel_size, n_resblock, out_dim, act=nn.ReLU(inplace=True), tail=False, batch_norm=False):
+    def __init__(self, in_dim, n_feats, kernel_size, n_resblock, out_dim, act=nn.ReLU(inplace=True), tail=False, norm_cfg=None):
         super(Resnet, self).__init__()
 
-        self.head = DynamicConv2d(in_dim, n_feats, kernel_size, batch_norm=batch_norm)
+        self.head = DynamicConv2d(in_dim, n_feats, kernel_size, norm_cfg=norm_cfg)
 
-        self.body = [ResBlock(DynamicConv2d, n_feats, kernel_size, act=act, batch_norm=batch_norm) for _ in range(n_resblock)]
+        self.body = [ResBlock(DynamicConv2d, n_feats, kernel_size, act=act, norm_cfg=norm_cfg) for _ in range(n_resblock)]
         self.body = nn.Sequential(*self.body)
 
         self.tail = None
         if tail:
-            self.tail = DynamicConv2d(n_feats, out_dim, kernel_size, batch_norm=batch_norm, act=None)
+            self.tail = DynamicConv2d(n_feats, out_dim, kernel_size, norm_cfg=norm_cfg, act=None)
 
     def forward(self, x):
         shallow = self.head(x)

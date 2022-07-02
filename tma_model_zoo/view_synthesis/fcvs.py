@@ -8,7 +8,7 @@ from ..basics.geometry import tensor_warping
 from ..basics.activation import stable_softmax
 from ..basics.dynamic_conv import DynamicConv2d
 from ..depth_volumes import *
-from ..basics.mapnet import ResidualPlusMapNet
+from ..basics.mapnet import ResidualMapNet
 
 
 class FCVS(BaseDepthVolumeModel):
@@ -29,8 +29,8 @@ class FCVS(BaseDepthVolumeModel):
         # sr prob maps
         self.prob_feat_conv = Resnet(in_dim=self.depth_num, n_feats=64, kernel_size=3, n_resblock=4, out_dim=64, tail=True)
         self.weight_feat_conv = Resnet(in_dim=self.depth_num, n_feats=64, kernel_size=3, n_resblock=4, out_dim=64, tail=True)
-        self.upscale_probs = ResidualPlusMapNet(in_channels=4, n_feats=64, out_channels=48)
-        self.upscale_weights = ResidualPlusMapNet(in_channels=4, n_feats=64, out_channels=48)
+        self.upscale_probs = ResidualMapNet(in_channels=4, n_feats=64, out_channels=48)
+        self.upscale_weights = ResidualMapNet(in_channels=4, n_feats=64, out_channels=48)
 
         # self.freeze_visibility()
         # self.freeze_sr_network()

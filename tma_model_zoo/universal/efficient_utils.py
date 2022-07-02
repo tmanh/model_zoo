@@ -1,3 +1,4 @@
+from opcode import stack_effect
 import re
 import math
 import collections
@@ -186,16 +187,10 @@ class BlockDecoder(object):
         Returns:
             block_string: A String form of BlockArgs.
         """
-        args = [
-            'r%d' % block.num_repeat,
-            'k%d' % block.kernel_size,
-            's%d%d' % (block.strides[0], block.strides[1]),
-            'e%s' % block.expand_ratio,
-            'i%d' % block.input_filters,
-            'o%d' % block.output_filters
-        ]
+        args = ['r%d' % block.num_repeat, 'k%d' % block.kernel_size, 's%d%d' % (block.strides[0], block.strides[1]), f'e{block.expand_ratio}', 'i%d' % block.input_filters, 'o%d' % block.output_filters]
+
         if 0 < block.se_ratio <= 1:
-            args.append('se%s' % block.se_ratio)
+            args.append(f'se{block.se_ratio}')
         if block.id_skip is False:
             args.append('noskip')
         return '_'.join(args)
@@ -280,8 +275,8 @@ def get_model_params(model_name, override_params):
         blocks_args, global_params
     """
     if not model_name.startswith('efficientnet'):
-        raise NotImplementedError('model name is not pre-defined: {}'.format(model_name))
-    
+        raise NotImplementedError(f'model name is not pre-defined: {model_name}')
+
     w, d, s, p = efficientnet_params(model_name)
     # note: all models have drop connect rate = 0.2
     blocks_args, global_params = efficientnet(width_coefficient=w, depth_coefficient=d, dropout_rate=p)
@@ -291,7 +286,7 @@ def get_model_params(model_name, override_params):
     return blocks_args, global_params
 
 
-def load_pretrained_weights(model, model_name, weights_path=None, load_fc=True, advprop=False, verbose=True):
+def load_pretrained_weights(model, model_name, weights_path=None, load_fc=False, advprop=False, verbose=True):
     """Loads pretrained weights from weights path or download using url.
     Args:
         model (Module): The whole model of efficientnet.
@@ -310,16 +305,64 @@ def load_pretrained_weights(model, model_name, weights_path=None, load_fc=True, 
         url_map_ = url_map_advprop if advprop else url_map
         state_dict = model_zoo.load_url(url_map_[model_name])
 
+    state_dict = convert_state_dict(state_dict)
+
     if load_fc:
         ret = model.load_state_dict(state_dict, strict=False)
-        assert not ret.missing_keys, 'Missing keys when loading pretrained weights: {}'.format(ret.missing_keys)
+        assert not ret.missing_keys, f'Missing keys when loading pretrained weights: {ret.missing_keys}'
     else:
         state_dict.pop('_fc.weight')
         state_dict.pop('_fc.bias')
         ret = model.load_state_dict(state_dict, strict=False)
-        assert set(ret.missing_keys) == set(
-            ['_fc.weight', '_fc.bias']), 'Missing keys when loading pretrained weights: {}'.format(ret.missing_keys)
-    assert not ret.unexpected_keys, 'Missing keys when loading pretrained weights: {}'.format(ret.unexpected_keys)
+        assert set(ret.missing_keys) == {'_fc.weight', '_fc.bias'}, f'Missing keys when loading pretrained weights: {ret.missing_keys}'
+
+    assert not ret.unexpected_keys, f'Missing keys when loading pretrained weights: {ret.unexpected_keys}'
 
     if verbose:
-        print('Loaded pretrained weights for {}'.format(model_name))
+        print(f'Loaded pretrained weights for {model_name}')
+
+
+def convert_state_dict(state_dict):
+    state_dict['_conv_stem.conv.weight'] = state_dict.pop('_conv_stem.weight')
+    state_dict['_conv_stem.bn.weight'] = state_dict.pop('_bn0.weight')
+    state_dict['_conv_stem.bn.bias'] = state_dict.pop('_bn0.bias')
+    state_dict['_conv_stem.bn.running_mean'] = state_dict.pop('_bn0.running_mean')
+    state_dict['_conv_stem.bn.running_var'] = state_dict.pop('_bn0.running_var')
+    state_dict['_conv_stem.bn.num_batches_tracked'] = state_dict.pop('_bn0.num_batches_tracked')
+
+    state_dict['_conv_head.conv.weight'] = state_dict.pop('_conv_head.weight')
+    state_dict['_conv_head.bn.weight'] = state_dict.pop('_bn1.weight')
+    state_dict['_conv_head.bn.bias'] = state_dict.pop('_bn1.bias')
+    state_dict['_conv_head.bn.running_mean'] = state_dict.pop('_bn1.running_mean')
+    state_dict['_conv_head.bn.running_var'] = state_dict.pop('_bn1.running_var')
+    state_dict['_conv_head.bn.num_batches_tracked'] = state_dict.pop('_bn1.num_batches_tracked')
+
+    for i in range(32):
+        if i >= 2:
+            state_dict[f'_blocks.{i}._expand_conv.conv.weight'] = state_dict.pop(f'_blocks.{i}._expand_conv.weight')
+            state_dict[f'_blocks.{i}._expand_conv.bn.weight'] = state_dict.pop(f'_blocks.{i}._bn0.weight')
+            state_dict[f'_blocks.{i}._expand_conv.bn.bias'] = state_dict.pop(f'_blocks.{i}._bn0.bias')
+            state_dict[f'_blocks.{i}._expand_conv.bn.running_mean'] = state_dict.pop(f'_blocks.{i}._bn0.running_mean')
+            state_dict[f'_blocks.{i}._expand_conv.bn.running_var'] = state_dict.pop(f'_blocks.{i}._bn0.running_var')
+            state_dict[f'_blocks.{i}._expand_conv.bn.num_batches_tracked'] = state_dict.pop(f'_blocks.{i}._bn0.num_batches_tracked')
+        state_dict[f'_blocks.{i}._depthwise_conv.conv.weight'] = state_dict.pop(f'_blocks.{i}._depthwise_conv.weight')
+        state_dict[f'_blocks.{i}._depthwise_conv.bn.weight'] = state_dict.pop(f'_blocks.{i}._bn1.weight')
+        state_dict[f'_blocks.{i}._depthwise_conv.bn.bias'] = state_dict.pop(f'_blocks.{i}._bn1.bias')
+        state_dict[f'_blocks.{i}._depthwise_conv.bn.running_mean'] = state_dict.pop(f'_blocks.{i}._bn1.running_mean')
+        state_dict[f'_blocks.{i}._depthwise_conv.bn.running_var'] = state_dict.pop(f'_blocks.{i}._bn1.running_var')
+        state_dict[f'_blocks.{i}._depthwise_conv.bn.num_batches_tracked'] = state_dict.pop(f'_blocks.{i}._bn1.num_batches_tracked')
+        state_dict[f'_blocks.{i}._se_reduce.conv.weight'] = state_dict.pop(f'_blocks.{i}._se_reduce.weight')
+        state_dict[f'_blocks.{i}._se_reduce.conv.bias'] = state_dict.pop(f'_blocks.{i}._se_reduce.bias')
+        state_dict[f'_blocks.{i}._se_expand.conv.weight'] = state_dict.pop(f'_blocks.{i}._se_expand.weight')
+        state_dict[f'_blocks.{i}._se_expand.conv.bias'] = state_dict.pop(f'_blocks.{i}._se_expand.bias')
+        state_dict[f'_blocks.{i}._project_conv.conv.weight'] = state_dict.pop(f'_blocks.{i}._project_conv.weight')
+        state_dict[f'_blocks.{i}._project_conv.bn.weight'] = state_dict.pop(f'_blocks.{i}._bn2.weight')
+        state_dict[f'_blocks.{i}._project_conv.bn.bias'] = state_dict.pop(f'_blocks.{i}._bn2.bias')
+        state_dict[f'_blocks.{i}._project_conv.bn.running_mean'] = state_dict.pop(f'_blocks.{i}._bn2.running_mean')
+        state_dict[f'_blocks.{i}._project_conv.bn.running_var'] = state_dict.pop(f'_blocks.{i}._bn2.running_var')
+        state_dict[f'_blocks.{i}._project_conv.bn.num_batches_tracked'] = state_dict.pop(f'_blocks.{i}._bn2.num_batches_tracked')
+
+    # print(state_dict.keys())
+    # exit()
+    # state_dict['_blocks.0._depthwise_conv.conv.weight'] = state_dict.pop('_blocks.0._depthwise_conv.conv.weight')
+    return state_dict

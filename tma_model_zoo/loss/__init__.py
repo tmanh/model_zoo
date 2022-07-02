@@ -40,6 +40,8 @@ class Loss(nn.modules.loss._Loss):
                 loss_function = VGGPerceptualLoss(args.mode)
             elif loss_type == 'SR':
                 loss_function = DSRLoss()
+            elif loss_type == 'Matterport':
+                loss_function = MatterportLoss()
             else:
                 loss_function = Adversarial(args)
             
@@ -78,9 +80,8 @@ class Loss(nn.modules.loss._Loss):
 
             total_loss += effective_loss
 
-        self.last_loss = total_loss.detach().cpu().numpy()
-
-        self.log[-1] += total_loss.detach().cpu().numpy()
+        self.last_loss = 0 if isinstance(total_loss, float) else total_loss.detach().cpu().numpy()
+        self.log[-1] += self.last_loss
 
         return total_loss
 

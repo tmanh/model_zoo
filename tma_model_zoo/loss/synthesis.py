@@ -72,6 +72,32 @@ class DSRLoss(nn.Module):
         return loss_refine + loss_coarse
 
 
+class MatterportLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.si = SIL1Loss()
+        self.l1 = nn.L1Loss()
+        self.l2 = nn.MSELoss()
+
+    def forward(self, tensors):
+        refine = tensors['refine']
+        gt_depth_hr = tensors['gt_depth_hr']
+
+        loss_refine = 0
+        for i in range(len(refine)):
+            if refine[i].shape[-2] != gt_depth_hr.shape[-2] or refine[i].shape[-1] != gt_depth_hr.shape[-1]:
+                tmp = functional.interpolate(gt_depth_hr, size=refine[i].shape[-2:], mode='bicubic', align_corners=True)
+                loss_refine += self.si(refine[i], tmp)
+            else:
+                loss_refine += self.si(refine[i], gt_depth_hr)
+
+        if not isinstance(loss_refine, float) and torch.isnan(loss_refine):
+            loss_refine = 0.0
+
+        return loss_refine
+
+
 class ProjectionLoss(nn.Module):
     def __init__(self):
         super().__init__()

@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as functional
 
-from tma_model_zoo.basics.dynamic_conv import SamePaddingConv2dBlock
+from tma_model_zoo.basics.dynamic_conv import DynamicConv2d
 
 
 class BaseNet(nn.Module):
@@ -24,9 +24,9 @@ class VDSR(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
 
-        self.conv1 = SamePaddingConv2dBlock(in_channels, 64, 3)
-        self.conv2 = nn.Sequential(*[SamePaddingConv2dBlock(64, 64, 3) for _ in range(18)])
-        self.conv3 = SamePaddingConv2dBlock(64, 1, 3, act=None)
+        self.conv1 = DynamicConv2d(in_channels, 64, 3)
+        self.conv2 = nn.Sequential(*[DynamicConv2d(64, 64, 3) for _ in range(18)])
+        self.conv3 = DynamicConv2d(64, 1, 3, act=None)
 
     def forward(self, x):
         identity = x

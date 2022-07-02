@@ -1,7 +1,7 @@
 import torch.nn as nn
 
 
-class Upsample(nn.Module):
+class Upscale(nn.Module):
     def __init__(self, scale_factor=None, mode='nearest', align_corners=False):
         super().__init__()
 

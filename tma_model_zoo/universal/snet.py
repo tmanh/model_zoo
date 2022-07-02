@@ -24,7 +24,7 @@ class SNetDS2BN_base_8(nn.Module):
         self.conv31 = DynamicConv2d(self.base_channels * 2, self.base_channels * 2, dilation=4, act=nn.ReLU(inplace=True))
         self.conv32 = DynamicConv2d(self.base_channels * 2, self.base_channels * 2, dilation=1, act=nn.ReLU(inplace=True))
 
-        self.out_conv = DynamicConv2d(self.base_channels * 6, out_channels, dilation=1, batch_norm=False, act=None)
+        self.out_conv = DynamicConv2d(self.base_channels * 6, out_channels, dilation=1, norm_cfg=None, act=None)
 
     def forward(self, x):
         x11 = self.conv11(x)
