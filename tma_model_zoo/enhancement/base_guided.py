@@ -96,4 +96,4 @@ class BaseFusion(nn.Module):
             x = self.refine[i](alpha * dfeats[i] + (1 - alpha) * beta)
             x = uc(x, dfeats[i])
 
-        return self.out_net(x), x
+        return [self.out_net(x)], x

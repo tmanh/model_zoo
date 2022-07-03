@@ -9,9 +9,9 @@ class TransformerGuided(nn.Module):
     def __init__(self, requires_grad):
         super().__init__()
 
-        mode = 'completion'  # estimate, completion
-
-        self.depth_from_color = DepthFormer(requires_grad=(mode=='estimate' and requires_grad))
+        self.mode = 'completion'  # estimate, completion
+        
+        self.depth_from_color = DepthFormer(requires_grad=(self.mode=='estimate' and requires_grad))
         self.fuse = BaseFusion(DepthFormer(in_channels=1, requires_grad=requires_grad), alpha_in_channels=[64, 96, 192, 384, 768])
 
     def estimate(self, color_lr):
@@ -28,5 +28,6 @@ class TransformerGuided(nn.Module):
             output = self.depth_from_color(color_lr)
         else:
             output, dfeat = self.extract_feats(depth_lr, color_lr)
+            print(output.shape)
         elapsed = time.time() - start
         return output, elapsed
