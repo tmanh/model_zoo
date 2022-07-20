@@ -32,7 +32,7 @@ class DynamicConv2d(nn.Module):
 class GatingConv2d(nn.Module):
     MODES = ['single', 'full']
 
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, dilation=1, groups=1, norm_cfg='BN2d', act=nn.ReLU(inplace=True), bias=False, requires_grad=True, mode='single'):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, dilation=1, groups=1, norm_cfg='BN2d', act=nn.ReLU(inplace=True), bias=False, requires_grad=True, mode='full'):
         super().__init__()
 
         gating_channels = 1 if mode == 'single' else out_channels
@@ -71,6 +71,19 @@ class UpSample(nn.Sequential):
     def forward(self, x, concat_with):
         up_x = functional.interpolate(x, size=concat_with.shape[-2:], mode='bilinear', align_corners=True)
         return self.convB(self.convA(torch.cat([up_x, concat_with], dim=1)))
+
+
+
+class UpSampleResidual(nn.Sequential):
+    def __init__(self, skip_input, output_features, conv=DynamicConv2d, norm_cfg=None, act=None, requires_grad=True):
+        super().__init__()
+        self.convA = conv(skip_input, output_features, kernel_size=3, stride=1, norm_cfg=norm_cfg, act=act, requires_grad=requires_grad)
+        self.convB = conv(output_features, output_features, kernel_size=3, stride=1, norm_cfg=norm_cfg, act=act, requires_grad=requires_grad)
+
+    def forward(self, x, concat_with):
+        print(x.shape, concat_with.shape)
+        up_x = functional.interpolate(x, size=concat_with.shape[-2:], mode='bilinear', align_corners=True)
+        return self.convB(self.convA(up_x + concat_with))
 
 
     

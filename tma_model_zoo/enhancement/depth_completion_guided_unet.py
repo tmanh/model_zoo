@@ -1,113 +1,19 @@
 from collections import namedtuple
 import sys
+import time
 import torch
 import torch.nn as nn
 
-from tma_model_zoo.basics.dynamic_conv import DynamicConv2d
-from tma_model_zoo.basics.upsampling import Upscale
-from tma_model_zoo.universal.efficient import EfficientNet
-from tma_model_zoo.universal.resnet import Resnet
-
-
-class ConvBlock(nn.Module):
-    def __init__(self, input_channel, output_channel, act=nn.LeakyReLU(inplace=True), down_size=True):
-        super().__init__()
-
-        self.conv1 = DynamicConv2d(input_channel, output_channel, 3, act=act, norm_cfg=None)
-        self.conv2 = DynamicConv2d(output_channel, output_channel, 3, act=act, norm_cfg=None)
-
-        if down_size:
-            self.conv3 = DynamicConv2d(output_channel, output_channel, 3, stride=2, act=act, norm_cfg=None)
-        else:
-            self.conv3 = DynamicConv2d(output_channel, output_channel, 3, act=act, norm_cfg=None)
-
-        self.down_size = down_size
-
-    def forward(self, x):
-        return self.conv3(self.conv2(self.conv1(x)))
-
-
-class FusionBlock(nn.Module):
-    def __init__(self, n_feats):
-        super(FusionBlock, self).__init__()
-
-        self.mask_4_depth = ConvBlock(n_feats, n_feats, act=nn.LeakyReLU(inplace=True), down_size=False)
-        self.mask_4_color = ConvBlock(n_feats, n_feats, act=nn.LeakyReLU(inplace=True), down_size=False)
-        self.alpha_conv = ConvBlock(n_feats, n_feats, act=nn.LeakyReLU(inplace=True), down_size=False)
-        self.beta_conv = ConvBlock(n_feats, n_feats, act=nn.LeakyReLU(inplace=True), down_size=False)
-
-    def forward(self, depth_feats, color_feats, mask_feats):
-        attention_depth_feats = self.mask_4_depth(mask_feats) * depth_feats
-        attention_color_feats = self.mask_4_color(mask_feats) * color_feats
-
-        guided_a = self.alpha_conv(attention_color_feats)
-        guided_b = self.beta_conv(attention_color_feats)
-
-        residual_depth_feats = guided_a * attention_depth_feats + guided_b
-
-        return depth_feats + residual_depth_feats
-
-
-class UnetDownBLock(nn.Module):
-    def __init__(self, enc_in_channels=None, enc_out_channels=None):
-        if enc_in_channels is None:
-            enc_in_channels = [3, 16, 32, 64, 128, 256]
-        if enc_out_channels is None:
-            enc_out_channels = [16, 32, 64, 128, 256, 512]
-        super().__init__()
-
-        self.encoders = [
-            ConvBlock(in_channel, out_channel, down_size=i != 0)
-            for i, (in_channel, out_channel) in enumerate(
-                zip(enc_in_channels, enc_out_channels)
-            )
-        ]
-
-        self.encoders = nn.ModuleList(*self.encoders)
-
-    def forward(self, x):
-        list_outputs = []
-        for encoder in self.encoders:
-            x = encoder(x)
-            list_outputs.append(x)
-        return list_outputs
-
-
-class UnetAttentionDownBLock(nn.Module):
-    def __init__(self, enc_in_channels = None, enc_out_channels = None, att_in_channels = None):
-        if enc_in_channels is None:
-            enc_in_channels = [1, 16, 32, 64, 128, 256]
-        if enc_out_channels is None:
-            enc_out_channels = [16, 32, 64, 128, 256, 512]
-        if att_in_channels is None:
-            att_in_channels = [16, 32, 64, 128, 256, 512]
-        super().__init__()
-
-        self.encoders = [
-            ConvBlock(in_channel, out_channel, down_size=i != 0)
-            for i, (in_channel, out_channel) in enumerate(
-                zip(enc_in_channels, enc_out_channels)
-            )
-        ]
-
-        self.encoders = nn.ModuleList(*self.encoders)
-
-        self.attentions = [
-            DynamicConv2d(in_channel, out_channel, norm_cfg=None, act=nn.LeakyReLU(inplace=True)) for in_channel, out_channel in zip(att_in_channels, enc_out_channels)
-        ]
-
-        self.attentions = nn.ModuleList(*self.attentions)
-
-    def forward(self, x, masks):
-        list_outputs = []
-        for encoder, attention, mask in zip(self.encoders, self.attentions, masks):
-            x = encoder(x) * attention(mask)
-            list_outputs.append(x)
-        return list_outputs
+from ..basics.dynamic_conv import DynamicConv2d
+from ..basics.swish import Swish
+from ..basics.upsampling import Upscale
+from ..universal.efficient import EfficientNet
+from ..universal.resnet import Resnet
+from .base import *
 
 
 class GuidedUnet(nn.Module):
-    def __init__(self, color_enc_in_channels = None, depth_enc_in_channels = None, enc_out_channels = None):
+    def __init__(self, color_enc_in_channels = None, depth_enc_in_channels = None, enc_out_channels = None, requires_grad=True):
         if color_enc_in_channels is None:
             color_enc_in_channels = [3, 16, 32, 64, 128, 256]
         if depth_enc_in_channels is None:
@@ -116,35 +22,35 @@ class GuidedUnet(nn.Module):
             enc_out_channels = [16, 32, 64, 128, 256, 512]
         super().__init__()
 
-        self.fusions = nn.ModuleList(*[FusionBlock(n_feats) for n_feats in enc_out_channels])
+        self.fusions = nn.ModuleList([FusionBlock(n_feats, requires_grad=requires_grad) for n_feats in enc_out_channels])
 
-        self.color_conv = UnetDownBLock(enc_in_channels=color_enc_in_channels, enc_out_channels=enc_out_channels)
-        self.color_mid_conv = self.create_bottleneck()
+        self.color_conv = UnetDownBLock(enc_in_channels=color_enc_in_channels, enc_out_channels=enc_out_channels, requires_grad=requires_grad)
+        self.color_mid_conv = self.create_bottleneck(requires_grad=requires_grad)
 
-        self.depth_conv = UnetAttentionDownBLock()
-        self.depth_mid_conv = self.create_bottleneck()
+        self.depth_conv = UnetAttentionDownBLock(requires_grad=requires_grad)
+        self.depth_mid_conv = self.create_bottleneck(requires_grad=requires_grad)
 
         up_in_channels = enc_out_channels[1:]
         up_out_channels = depth_enc_in_channels[1:]
-        self.depth_up = nn.ModuleList(*[ConvBlock(in_channel, out_channels, down_size=False)
+        self.depth_up = nn.ModuleList([ConvBlock(in_channel, out_channels, down_size=False, requires_grad=requires_grad)
                                         for in_channel, out_channels in zip(up_in_channels, up_out_channels)])
 
         # mask
-        self.mask_conv = UnetDownBLock(enc_in_channels=depth_enc_in_channels, enc_out_channels=enc_out_channels)
+        self.mask_conv = UnetDownBLock(enc_in_channels=depth_enc_in_channels, enc_out_channels=enc_out_channels, requires_grad=requires_grad)
 
-        self.feature_net = DynamicConv2d(16, 64, 3, act=None, norm_cfg=None)
-        self.last_conv1 = nn.Conv2d(16, 16, 3, padding=1)
-        self.last_conv2 = nn.Conv2d(16, 1, 1, padding=0)
+        self.last_conv1 = DynamicConv2d(16, 16, 3, norm_cfg=None, requires_grad=requires_grad)
+        self.last_conv2 = DynamicConv2d(16, 1, 1, norm_cfg=None, act=None, requires_grad=requires_grad)
         self.act = nn.ReLU()
 
-        self.upscale = Upscale()
+        self.upscale = Upscale(mode='bilinear')
 
-    def create_bottleneck(self):
-        return nn.Sequential(*[DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), norm_cfg=None),
-                               DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), norm_cfg=None),
-                               DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), norm_cfg=None)])
+    def create_bottleneck(self, requires_grad=True):
+        return nn.Sequential(*[DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), norm_cfg=None, requires_grad=requires_grad),
+                               DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), norm_cfg=None, requires_grad=requires_grad),
+                               DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), norm_cfg=None, requires_grad=requires_grad)])
 
     def forward(self, color, depth, mask):
+        start = time.time()
         m_feats = self.mask_conv(mask)
         c_feats_1, c_feats_2, c_feats_3, c_feats_4, c_feats_5, c_feats_6 = self.color_conv(color)
         d_feats_1, d_feats_2, d_feats_3, d_feats_4, d_feats_5, d_feats_6 = self.depth_conv(depth, m_feats)
@@ -156,9 +62,8 @@ class GuidedUnet(nn.Module):
         d_decode = self.decode(c_feats, d_feats, m_feats)
 
         d_out = self.last_conv2(self.act(self.last_conv1(d_decode)) + d_decode)
-        d_feat_out = self.feature_net(d_out)
 
-        return d_out, d_feat_out
+        return [d_out], d_decode, time.time() - start
 
     def bottleneck(self, c_feats_6, d_feats_6):
         c_feats_7 = self.color_mid_conv(c_feats_6)
@@ -181,34 +86,30 @@ class GuidedUnet(nn.Module):
 
 
 class GuidedEfficientNet(nn.Module):
-    def __init__(self, n_feats, act, mode, backbone='efficientnet-b4', enc_in_channels = None, mask_channels=16, n_resblocks=8):
+    def __init__(self, n_feats=64, act=nn.ReLU(inplace=True), mode='rgb-m', backbone='efficientnet-b4', enc_in_channels = None, mask_channels=16, n_resblocks=8, requires_grad=True):
         if enc_in_channels is None:
             enc_in_channels = [48, 32, 56, 160, 448]
         super().__init__()
 
         self.mode = mode
-        self.backbone = StageEfficientNet.from_pretrained(backbone, in_channels=4 if 'efficient-rgbm' in self.mode else 3)
+        self.backbone = StageEfficientNet.from_pretrained(backbone, in_channels=4 if 'rgbm' in self.mode else 3, requires_grad=requires_grad)
 
         self.depth_conv = Resnet(1, n_feats, 3, n_resblocks, n_feats, act)
 
-        self.alphas = nn.ModuleList([DynamicConv2d(i, n_feats, norm_cfg=None, act=act) for i in enc_in_channels][::-1])
-        self.betas = nn.ModuleList([DynamicConv2d(i, n_feats, norm_cfg=None, act=act) for i in enc_in_channels][::-1])
-        self.downs = nn.ModuleList([ConvBlock(n_feats, n_feats) for _ in enc_in_channels])
-        self.ups = nn.ModuleList([ConvBlock(n_feats, n_feats, down_size=False) for _ in enc_in_channels])
+        self.alphas = nn.ModuleList([DynamicConv2d(i, n_feats, norm_cfg=None, act=act, requires_grad=requires_grad) for i in enc_in_channels][::-1])
+        self.betas = nn.ModuleList([DynamicConv2d(i, n_feats, norm_cfg=None, act=act, requires_grad=requires_grad) for i in enc_in_channels][::-1])
+        self.downs = nn.ModuleList([ConvBlock(n_feats, n_feats, requires_grad=requires_grad) for _ in enc_in_channels])
+        self.ups = nn.ModuleList([ConvBlock(n_feats, n_feats, down_size=False, requires_grad=requires_grad) for _ in enc_in_channels])
 
         self.n_output = 1
-        if '-u' in self.mode:
-            self.n_output = 64
-            self.min_d, self.max_d = 0.5, 10
-            self.softmax = nn.Softmax(dim=1)
 
-        self.out_net = DynamicConv2d(n_feats, self.n_output, norm_cfg=None, act=act)
+        self.out_net = DynamicConv2d(n_feats, self.n_output, norm_cfg=None, act=act, requires_grad=requires_grad)
         self.upscale = Upscale(mode='bilinear')
 
-        if 'efficient-rgb-m' in self.mode:
+        if 'rgb-m' in self.mode:
             mask_in_channels = [mask_channels, *enc_in_channels[:-1]]
-            self.masks = nn.ModuleList([ConvBlock(i, o) for i, o in zip(mask_in_channels, enc_in_channels)])
-            self.mask_conv = Resnet(1, n_feats, 3, n_resblocks, mask_channels, act, tail=True)
+            self.masks = nn.ModuleList([ConvBlock(i, o, requires_grad=requires_grad) for i, o in zip(mask_in_channels, enc_in_channels)])
+            self.mask_conv = Resnet(1, n_feats, 3, n_resblocks, mask_channels, act, tail=True, requires_grad=requires_grad)
 
     def compute_upscaled_feats(self, feats, guidances, height, width):
         upscaled_feats = feats[0]
@@ -242,12 +143,13 @@ class GuidedEfficientNet(nn.Module):
         return feats[::-1]
 
     def forward(self, color, depth, mask):
-        n_samples, _, height, width = depth.size()
+        start = time.time()
+        _, _, height, width = depth.size()
 
         shallow_feats = self.depth_conv(depth)
         depth_feats = self.compute_down_feats(shallow_feats)
 
-        if 'efficient-rgb-m' in self.mode:
+        if 'rgb-m' in self.mode:
             guidance_feats = self.backbone(color)[::-1]
             mask_feats = self.compute_mask_feats(mask)
             guidance_feats = [guidance_feats[i] * mask_feats[i] for i in range(len(mask_feats))]
@@ -260,12 +162,7 @@ class GuidedEfficientNet(nn.Module):
         if 'residual' in self.mode:
             out = out + depth
 
-        if '-u' in self.mode:
-            list_depth = torch.linspace(self.min_d, self.max_d, self.n_output, device=out.device).view(1, self.n_output, 1, 1)
-            list_depth = list_depth.repeat(n_samples, 1, height, width)
-            out = torch.sum(self.softmax(out) * list_depth, dim=1, keepdims=True)
-
-        return out, up_feats
+        return [out], up_feats, time.time()-start
 
 
 StageSpec = namedtuple("StageSpec", ["num_channels", "stage_stamp"],)
@@ -303,8 +200,8 @@ class StageEfficientNet(EfficientNet):
 
     @classmethod
     def from_pretrained(cls, model_name, weights_path=None, advprop=False,
-                        in_channels=3, num_classes=1000, **override_params):
-        model = super().from_pretrained(model_name, weights_path, advprop, in_channels, num_classes, *override_params)
+                        in_channels=3, num_classes=1000, requires_grad=True, **override_params):
+        model = super().from_pretrained(model_name, weights_path, advprop, in_channels, num_classes, requires_grad=requires_grad, *override_params)
         model.update_stages(model_name)
         return model
 
@@ -315,7 +212,7 @@ class StageEfficientNet(EfficientNet):
         return self.stage_specs[-1].num_channels
 
     def forward(self, x):
-        x = self._swish(self._bn0(self._conv_stem(x)))
+        x = self._conv_stem(x)
         block_idx = 0.
         features = [x]
         for stage in [

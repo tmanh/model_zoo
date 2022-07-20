@@ -43,8 +43,12 @@ class SIL1Loss(nn.Module):  # Main loss function used in AdaBins paper
         if _target.shape[0] == 0:
             return 0
 
-        g = torch.abs(_output - _target)
-        return torch.std(g) + torch.mean(g)
+        mean_g = torch.mean(torch.abs(_output - _target))
+
+        # log_g = torch.log(_output) - torch.log(_target)
+        # dg = torch.var(log_g) + 0.15 * torch.pow(torch.mean(log_g), 2) + mean_g
+
+        return mean_g
 
 
 class DSRLoss(nn.Module):
@@ -76,7 +80,7 @@ class MatterportLoss(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.si = SIL1Loss()
+        self.si = SILogLoss()
         self.l1 = nn.L1Loss()
         self.l2 = nn.MSELoss()
 
@@ -84,15 +88,17 @@ class MatterportLoss(nn.Module):
         refine = tensors['refine']
         gt_depth_hr = tensors['gt_depth_hr']
 
-        loss_refine = 0
+        loss_refine = 0  # self.si(refine[-1], gt_depth_hr)
+        # """
         for i in range(len(refine)):
             if refine[i].shape[-2] != gt_depth_hr.shape[-2] or refine[i].shape[-1] != gt_depth_hr.shape[-1]:
                 tmp = functional.interpolate(gt_depth_hr, size=refine[i].shape[-2:], mode='bicubic', align_corners=True)
                 loss_refine += self.si(refine[i], tmp)
             else:
                 loss_refine += self.si(refine[i], gt_depth_hr)
+        # """
 
-        if not isinstance(loss_refine, float) and torch.isnan(loss_refine):
+        if not isinstance(loss_refine, float) and not isinstance(loss_refine, int)  and torch.isnan(loss_refine):
             loss_refine = 0.0
 
         return loss_refine

@@ -55,7 +55,7 @@ class MBConvBlock(nn.Module):
         # Squeeze and Excitation layer, if desired
         if self.has_se:
             num_squeezed_channels = max(1, int(self._block_args.input_filters * self._block_args.se_ratio))
-            self._se_reduce = DynamicConv2d(in_channels=oup, out_channels=num_squeezed_channels, kernel_size=1, norm_cfg=None, bias=True)
+            self._se_reduce = DynamicConv2d(in_channels=oup, out_channels=num_squeezed_channels, kernel_size=1, norm_cfg=None, act=nn.ReLU(inplace=False), bias=True)
             self._se_expand = DynamicConv2d(in_channels=num_squeezed_channels, out_channels=oup, kernel_size=1, norm_cfg=None, bias=True)
 
         # Pointwise convolution phase
@@ -276,7 +276,7 @@ class EfficientNet(nn.Module):
         return x
 
     @classmethod
-    def from_name(cls, model_name, in_channels=3, **override_params):
+    def from_name(cls, model_name, in_channels=3, requires_grad=True, **override_params):
         """Create an efficientnet model according to name.
         Args:
             model_name (str): Name for efficientnet.
@@ -294,12 +294,12 @@ class EfficientNet(nn.Module):
         """
         cls._check_model_name_is_valid(model_name)
         blocks_args, global_params = get_model_params(model_name, override_params)
-        model = cls(blocks_args, global_params)
+        model = cls(blocks_args, global_params, requires_grad=requires_grad)
         model._change_in_channels(in_channels)
         return model
 
     @classmethod
-    def from_pretrained(cls, model_name, weights_path=None, advprop=False, in_channels=3, num_classes=1000, **override_params):
+    def from_pretrained(cls, model_name, weights_path=None, advprop=False, in_channels=3, num_classes=1000, requires_grad=True, **override_params):
         """Create an efficientnet model according to name.
         Args:
             model_name (str): Name for efficientnet.
@@ -320,7 +320,7 @@ class EfficientNet(nn.Module):
         Returns:
             A pretrained efficientnet model.
         """
-        model = cls.from_name(model_name, num_classes=num_classes, **override_params)
+        model = cls.from_name(model_name, num_classes=num_classes, requires_grad=requires_grad, **override_params)
         load_pretrained_weights(model, model_name, weights_path=weights_path, load_fc=(num_classes==1000), advprop=advprop)
         model._change_in_channels(in_channels)
         return model
@@ -355,4 +355,4 @@ class EfficientNet(nn.Module):
         """
         if in_channels != 3:
             out_channels = round_filters(32, self._global_params)
-            self._conv_stem = DynamicConv2d(in_channels, out_channels, kernel_size=3, stride=2, bias=False, norm_cfg=self.bn_mom, act=self.swish, requires_grad=self.requires_grad)
+            self._conv_stem = DynamicConv2d(in_channels, out_channels, kernel_size=3, stride=2, bias=False, norm_cfg='BN2d', act=self.swish, requires_grad=self.requires_grad)

@@ -64,9 +64,9 @@ class HAHIHetero(nn.Module):
     """
 
     def __init__(self, in_channels, out_channels, embedding_dim, scales = None, norm_cfg='BN2d', act=nn.ReLU(inplace=True), cross_att=True, self_att=True, constrain=False,
-                 positional_encoding=SinePositionalEncoding, num_points=8, requires_grad=True):
+                 positional_encoding=SinePositionalEncoding, num_points=8, requires_grad=True, num_feature_levels=6):
         if scales is None:
-            scales = [1, 1, 1, 1]
+            scales = [1 for _ in range(num_feature_levels)]
         
         super().__init__()
         assert isinstance(in_channels, list)
@@ -96,7 +96,7 @@ class HAHIHetero(nn.Module):
 
         ########################################
 
-        num_feature_levels = 4 # transformer feature level
+        num_feature_levels = num_feature_levels # transformer feature level
 
         self.trans_positional_encoding = positional_encoding(num_feats=128)
         self.conv_positional_encoding = positional_encoding(num_feats=128)
@@ -104,8 +104,8 @@ class HAHIHetero(nn.Module):
         self.reference_points = nn.Linear(self.embedding_dim, 2)
         self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, self.embedding_dim))
 
-        self.multi_att = MultiScaleDeformableAttention(embed_dims=self.embedding_dim, num_levels=4, num_heads=8, num_points=num_points, batch_first=True)
-        self.self_attn = MultiScaleDeformableAttention(embed_dims=self.embedding_dim, num_levels=4, num_heads=8, num_points=num_points, batch_first=True)
+        self.multi_att = MultiScaleDeformableAttention(embed_dims=self.embedding_dim, num_levels=num_feature_levels-1, num_heads=8, num_points=num_points, batch_first=True)
+        self.self_attn = MultiScaleDeformableAttention(embed_dims=self.embedding_dim, num_levels=num_feature_levels-1, num_heads=8, num_points=num_points, batch_first=True)
 
         for param in self.trans_positional_encoding.parameters():
             param.requires_grad = requires_grad
@@ -229,7 +229,6 @@ class HAHIHetero(nn.Module):
         spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=src_flatten.device)
         level_start_index = torch.cat((spatial_shapes.new_zeros((1, )), spatial_shapes.prod(1).cumsum(0)[:-1]))
         valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
-
         reference_points = self.get_reference_points(spatial_shapes, valid_ratios, device=src_flatten.device)
         if self.self_att:
             src = self.self_attn(src_flatten, key=None, value=None,

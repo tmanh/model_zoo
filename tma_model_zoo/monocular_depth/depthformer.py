@@ -1,27 +1,34 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as functional
 
-from ..basics.dynamic_conv import DynamicConv2d, UpSample
+from ..basics.dynamic_conv import DynamicConv2d, UpSample, UpSampleResidual
 from ..basics.norm import NormBuilder
-from ..universal.swin import SwinTransformerV2
+from ..universal.swin import SwinTransformerV2, SwinTransformerA
 from ..universal.hahi import HAHIHetero
 
 
 class DepthFormerEncode(nn.Module):
-    def __init__(self, in_channels=3, nfeats=64, requires_grad=True):
+    def __init__(self, in_channels=3, requires_grad=True):
         super().__init__()
+        # self.swin_transformer = SwinTransformerV2(in_channels=in_channels, requires_grad=requires_grad)
+        self.swin_transformer = SwinTransformerA(in_chans=in_channels, requires_grad=requires_grad)
+        # w1 = self.swin_transformer.layers[0].blocks[0].attn.cpb_mlp[0].weight.data.clone()
+        # print(self.swin_transformer)
+        # self.swin_transformer.load_pretrained()
+        # w2 = self.swin_transformer.layers[0].blocks[0].attn.cpb_mlp[0].weight.data.clone()
+        # print(torch.abs(w1 - w2).sum())
 
-        self.stem = DynamicConv2d(in_channels, nfeats, kernel_size=7, stride=1, bias=False)
+        if isinstance(self.swin_transformer, SwinTransformerV2):
+            self.nfeats = 64
+            self.stem = DynamicConv2d(in_channels, self.nfeats, kernel_size=7, stride=1, bias=False, requires_grad=requires_grad)
 
-        self.swin_transformer = SwinTransformerV2(in_chans=in_channels, requires_grad=requires_grad)
-        self.swin_transformer.load_pretrained()
-        
-        self.list_feats = [64, 96, 192, 384, 768]
-        self.norms = nn.ModuleList([NormBuilder.build(cfg=dict(type='LN', requires_grad=requires_grad), num_features=f) for f in self.list_feats[1:]])
-        self.neck = HAHIHetero(in_channels=self.list_feats, out_channels=self.list_feats, embedding_dim=256, requires_grad=requires_grad)
+        self.list_feats = self.swin_transformer.list_feats
+        self.norms = nn.ModuleList([NormBuilder.build(cfg=dict(type='BN2d', requires_grad=requires_grad), num_features=f) for f in self.list_feats])
 
-        for param in self.stem.parameters():
-            param.requires_grad = requires_grad
+        if isinstance(self.swin_transformer, SwinTransformerV2):
+            self.list_feats = [self.nfeats] + self.list_feats
+        self.neck = HAHIHetero(in_channels=self.list_feats, out_channels=self.list_feats, embedding_dim=256, num_feature_levels=len(self.list_feats), requires_grad=requires_grad)
 
     def conv_stem(self, x, resolution):
         if x.shape[1:3] != resolution:
@@ -31,8 +38,10 @@ class DepthFormerEncode(nn.Module):
     def forward(self, x):
         n_samples = x.shape[0]
 
-        stem_feats = self.conv_stem(x, x.shape[1:3])
-        outs = [stem_feats]
+        outs = []
+        if isinstance(self.swin_transformer, SwinTransformerV2):
+            stem_feats = self.conv_stem(x, x.shape[1:3])
+            outs = [stem_feats]
 
         transformer_outs, resolutions = self.swin_transformer(x)
         self.norm_transformer_outputs(n_samples, outs, transformer_outs, resolutions)
@@ -69,6 +78,7 @@ class DepthFormerDecode(nn.Module):
             if index == 0:
                 self.conv_list.append(DynamicConv2d(in_channels=in_channel, out_channels=up_channel, kernel_size=1, stride=1, norm_cfg=None, act=None, requires_grad=requires_grad))
             else:
+                print(in_channel, up_channel)
                 self.conv_list.append(UpSample(skip_input=in_channel + up_channel_temp, output_features=up_channel, norm_cfg=self.norm_cfg, act=self.act, requires_grad=requires_grad))
 
             self.conv_depth.append(nn.Conv2d(up_channel, 1, kernel_size=3, padding=1, stride=1))
@@ -91,23 +101,23 @@ class DepthFormerDecode(nn.Module):
                 temp_feat = self.conv_list[index](up_feat, skip_feat)
             temp_feat_list.append(temp_feat)
 
-        return temp_feat_list
+        return [torch.sigmoid(self.conv_depth[-1](temp_feat_list[-1]))], temp_feat_list
 
     def forward(self, inputs):
-        temp_feat_list = self.extract_feats(inputs)
-        return [self.relu(self.conv_depth[i](temp_feat_list[i])) + self.min_depth for i in range(len(temp_feat_list))]
+        _, temp_feat_list = self.extract_feats(inputs)
+        return [torch.sigmoid(self.conv_depth[-1](temp_feat_list[-1]))]
 
 
 class DepthFormer(nn.Module):
-    def __init__(self, in_channels=3, nfeats=64, requires_grad=True):
+    def __init__(self, in_channels=3, requires_grad=True):
         super().__init__()
 
-        self.encode = DepthFormerEncode(in_channels, nfeats, requires_grad)
+        self.encode = DepthFormerEncode(in_channels, requires_grad=requires_grad)
         self.decode = DepthFormerDecode(in_channels=self.encode.list_feats, requires_grad=requires_grad)
+        self.list_feats = self.encode.list_feats
 
     def extract_feats(self, x):
-        feats = self.encode(x)
-        return self.decode.extract_feats(feats)
+        return self.decode.extract_feats(self.encode(x))
 
     def forward(self, x):
         feats = self.encode(x)
