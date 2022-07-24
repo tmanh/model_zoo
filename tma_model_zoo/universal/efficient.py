@@ -55,15 +55,15 @@ class MBConvBlock(nn.Module):
         # Squeeze and Excitation layer, if desired
         if self.has_se:
             num_squeezed_channels = max(1, int(self._block_args.input_filters * self._block_args.se_ratio))
-            self._se_reduce = DynamicConv2d(in_channels=oup, out_channels=num_squeezed_channels, kernel_size=1, norm_cfg=None, act=nn.ReLU(inplace=False), bias=True)
-            self._se_expand = DynamicConv2d(in_channels=num_squeezed_channels, out_channels=oup, kernel_size=1, norm_cfg=None, bias=True)
+            self._se_reduce = DynamicConv2d(in_channels=oup, out_channels=num_squeezed_channels, kernel_size=1, norm_cfg=None, act=nn.ReLU(inplace=False), bias=True, requires_grad=requires_grad)
+            self._se_expand = DynamicConv2d(in_channels=num_squeezed_channels, out_channels=oup, kernel_size=1, norm_cfg=None, bias=True, requires_grad=requires_grad)
 
         # Pointwise convolution phase
         final_oup = self._block_args.output_filters
         if self.gating:
-            self._project_conv = GatingConv2d(in_channels=oup, out_channels=final_oup, kernel_size=1, bias=False, norm_cfg=norm_cfg, act=Swish(inplace=True), mode='single')
+            self._project_conv = GatingConv2d(in_channels=oup, out_channels=final_oup, kernel_size=1, bias=False, norm_cfg=norm_cfg, act=Swish(inplace=True), mode='single', requires_grad=requires_grad)
         else:
-            self._project_conv = DynamicConv2d(in_channels=oup, out_channels=final_oup, kernel_size=1, bias=False, norm_cfg=norm_cfg, act=Swish(inplace=True))
+            self._project_conv = DynamicConv2d(in_channels=oup, out_channels=final_oup, kernel_size=1, bias=False, norm_cfg=norm_cfg, act=Swish(inplace=True), requires_grad=requires_grad)
 
         self._swish = Swish(inplace=True)
 

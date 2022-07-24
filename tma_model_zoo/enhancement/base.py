@@ -31,8 +31,12 @@ class FusionBlock(nn.Module):
         self.beta_conv = ConvBlock(n_feats, n_feats, act=nn.LeakyReLU(inplace=True), down_size=False, requires_grad=requires_grad)
 
     def forward(self, depth_feats, color_feats, mask_feats):
-        attention_depth_feats = self.mask_4_depth(mask_feats) * depth_feats
-        attention_color_feats = self.mask_4_color(mask_feats) * color_feats
+        if mask_feats is not None:
+            attention_depth_feats = self.mask_4_depth(mask_feats) * depth_feats
+            attention_color_feats = self.mask_4_color(mask_feats) * color_feats
+        else:
+            attention_depth_feats = depth_feats
+            attention_color_feats = color_feats
 
         guided_a = self.alpha_conv(attention_color_feats)
         guided_b = self.beta_conv(attention_color_feats)

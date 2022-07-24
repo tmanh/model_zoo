@@ -1,7 +1,7 @@
 import time
 import torch.nn as nn
 
-from ..monocular_depth.depthformer import DepthFormer
+from ..monocular_depth.depthformer import DepthFormer, DepthEfficient
 from .base_guided import BaseFusion, DepthEncoder
 from .cspn_fusion import CSPNFusion
 
@@ -10,10 +10,11 @@ class TransformerGuided(nn.Module):
     def __init__(self, requires_grad):
         super().__init__()
 
-        self.mode = 'estimate'  # estimate, completion
+        self.mode = 'completion'  # estimate, completion
 
         # self.depth_from_color = DepthFormer(requires_grad=(False if self.mode == 'completion' else requires_grad))
         self.depth_from_color = DepthFormer(requires_grad=requires_grad)
+        # self.depth_from_color = DepthEfficient(requires_grad=requires_grad)
         alpha_in_channels = self.depth_from_color.encode.list_feats
         self.fuse = BaseFusion(DepthEncoder(depth_in_channels=alpha_in_channels, requires_grad=requires_grad), alpha_in_channels=alpha_in_channels)  # [64, 96, 192, 384, 768]
         # self.fuse = BaseFusion(DepthFormer(in_channels=1, requires_grad=requires_grad), alpha_in_channels=alpha_in_channels)  # [64, 96, 192, 384, 768]

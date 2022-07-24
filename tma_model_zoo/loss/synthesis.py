@@ -88,6 +88,8 @@ class MatterportLoss(nn.Module):
         refine = tensors['refine']
         gt_depth_hr = tensors['gt_depth_hr']
 
+        coarse = tensors['coarse'] if 'coarse' in tensors.keys() else None
+
         loss_refine = 0  # self.si(refine[-1], gt_depth_hr)
         # """
         for i in range(len(refine)):
@@ -97,6 +99,14 @@ class MatterportLoss(nn.Module):
             else:
                 loss_refine += self.si(refine[i], gt_depth_hr)
         # """
+
+        if coarse is not None:
+            for i in range(len(coarse)):
+                if refine[i].shape[-2] != gt_depth_hr.shape[-2] or refine[i].shape[-1] != gt_depth_hr.shape[-1]:
+                    tmp = functional.interpolate(gt_depth_hr, size=refine[i].shape[-2:], mode='bicubic', align_corners=True)
+                    loss_refine += self.si(coarse[i], tmp)
+                else:
+                    loss_refine += self.si(coarse[i], gt_depth_hr)
 
         if not isinstance(loss_refine, float) and not isinstance(loss_refine, int)  and torch.isnan(loss_refine):
             loss_refine = 0.0

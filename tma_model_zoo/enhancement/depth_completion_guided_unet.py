@@ -5,15 +5,88 @@ import torch
 import torch.nn as nn
 
 from ..basics.dynamic_conv import DynamicConv2d
-from ..basics.swish import Swish
 from ..basics.upsampling import Upscale
 from ..universal.efficient import EfficientNet
 from ..universal.resnet import Resnet
 from .base import *
 
 
+class GuidedUnetBasic(nn.Module):
+    def __init__(self, color_enc_in_channels=None, depth_enc_in_channels=None, enc_out_channels=None, requires_grad=True):
+        if color_enc_in_channels is None:
+            color_enc_in_channels = [4, 16, 32, 64, 128, 256]
+        if depth_enc_in_channels is None:
+            depth_enc_in_channels = [1, 16, 32, 64, 128, 256]
+        if enc_out_channels is None:
+            enc_out_channels = [16, 32, 64, 128, 256, 512]
+        super().__init__()
+
+        self.fusions = nn.ModuleList([FusionBlock(n_feats, requires_grad=requires_grad) for n_feats in enc_out_channels])
+
+        self.color_conv = UnetDownBLock(enc_in_channels=color_enc_in_channels, enc_out_channels=enc_out_channels, requires_grad=requires_grad)
+        self.color_mid_conv = self.create_bottleneck(requires_grad=requires_grad)
+
+        self.depth_conv = UnetDownBLock(enc_in_channels=depth_enc_in_channels, enc_out_channels=enc_out_channels, requires_grad=requires_grad)
+        self.depth_mid_conv = self.create_bottleneck(requires_grad=requires_grad)
+
+        up_in_channels = enc_out_channels[1:]
+        up_out_channels = depth_enc_in_channels[1:]
+        self.depth_up = nn.ModuleList([ConvBlock(in_channel, out_channels, down_size=False, requires_grad=requires_grad)
+                                        for in_channel, out_channels in zip(up_in_channels, up_out_channels)])
+
+        # mask
+        self.mask_conv = UnetDownBLock(enc_in_channels=depth_enc_in_channels, enc_out_channels=enc_out_channels, requires_grad=requires_grad)
+
+        self.last_conv1 = DynamicConv2d(16, 16, 3, norm_cfg=None, requires_grad=requires_grad)
+        self.last_conv2 = DynamicConv2d(16, 1, 1, norm_cfg=None, act=None, requires_grad=requires_grad)
+        self.act = nn.ReLU()
+
+        self.upscale = Upscale(mode='bilinear')
+
+    def create_bottleneck(self, requires_grad=True):
+        return nn.Sequential(*[DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), norm_cfg=None, requires_grad=requires_grad),
+                               DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), norm_cfg=None, requires_grad=requires_grad),
+                               DynamicConv2d(512, 512, 3, act=nn.LeakyReLU(inplace=True), norm_cfg=None, requires_grad=requires_grad)])
+
+    def forward(self, color, depth, mask):
+        start = time.time()
+        guidance = torch.cat([color, mask], dim=1)
+        c_feats_1, c_feats_2, c_feats_3, c_feats_4, c_feats_5, c_feats_6 = self.color_conv(guidance)
+        d_feats_1, d_feats_2, d_feats_3, d_feats_4, d_feats_5, d_feats_6 = self.depth_conv(depth)
+
+        c_feats_8, d_feats_8 = self.bottleneck(c_feats_6, d_feats_6)
+
+        c_feats = [c_feats_1, c_feats_2, c_feats_3, c_feats_4, c_feats_5, c_feats_8]
+        d_feats = [d_feats_1, d_feats_2, d_feats_3, d_feats_4, d_feats_5, d_feats_8]
+        d_decode = self.decode(c_feats, d_feats)
+
+        d_out = self.last_conv2(self.act(self.last_conv1(d_decode)) + d_decode)
+
+        return [d_out], d_decode, time.time() - start
+
+    def bottleneck(self, c_feats_6, d_feats_6):
+        c_feats_7 = self.color_mid_conv(c_feats_6)
+        c_feats_8 = c_feats_7 + c_feats_6
+
+        d_feats_7 = self.depth_mid_conv(d_feats_6)
+        d_feats_8 = d_feats_7 + d_feats_6
+        return c_feats_8, d_feats_8
+
+    def decode(self, c_feats, d_feats):
+        x_up = 0
+        for i in range(len(c_feats)):
+            x_up = self.fusions[-i-1](x_up + d_feats[-i-1], c_feats[-i-1], None)
+
+            if i != len(c_feats) - 1:
+                x_up = self.upscale(x_up, size=(d_feats[-i-2].shape[2], d_feats[-i-2].shape[3]))
+                x_up = self.depth_up[-i-1](x_up)
+
+        return x_up
+
+
+
 class GuidedUnet(nn.Module):
-    def __init__(self, color_enc_in_channels = None, depth_enc_in_channels = None, enc_out_channels = None, requires_grad=True):
+    def __init__(self, color_enc_in_channels=None, depth_enc_in_channels=None, enc_out_channels=None, requires_grad=True, mask_channels=16):
         if color_enc_in_channels is None:
             color_enc_in_channels = [3, 16, 32, 64, 128, 256]
         if depth_enc_in_channels is None:
