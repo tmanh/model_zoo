@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as functional
 
+from ..universal.resnet import Resnet
+
 from ..enhancement.depth_completion_guided_unet import StageEfficientNet
 
 from ..basics.dynamic_conv import DynamicConv2d, UpSample, UpSampleResidual, DownSample
@@ -30,7 +32,6 @@ class EfficientEncode(nn.Module):
             param.requires_grad = False
 
         self.neck = HAHIHetero(in_channels=self.list_feats, out_channels=self.list_feats, embedding_dim=256, num_feature_levels=len(self.list_feats), requires_grad=requires_grad)
-        self.neck.init_weights()
         
     def forward(self, color):
         shallow_feats = self.stem(color)
@@ -62,7 +63,7 @@ class DepthFormerEncode(nn.Module):
             self.stem = DepthFormerStem(in_channels, self.nfeats, requires_grad=requires_grad)
 
         self.list_feats = self.swin_transformer.list_feats
-        self.norms = nn.ModuleList([NormBuilder.build(cfg=dict(type='LN', requires_grad=requires_grad), num_features=f) for f in self.list_feats])
+        self.norms = nn.ModuleList([NormBuilder.build(cfg=dict(type='BN2d', requires_grad=requires_grad), num_features=f) for f in self.list_feats])
 
         if isinstance(self.swin_transformer, SwinTransformerV2):
             self.list_feats = self.nfeats + self.list_feats
@@ -73,17 +74,18 @@ class DepthFormerEncode(nn.Module):
             x = functional.interpolate(x, size=resolution, mode='bilinear', align_corners=True)
         return self.stem(x)
 
+    def extract_feats(self, x):
+        return self.forward(x)
+
     def forward(self, x):
         n_samples = x.shape[0]
 
         outs = []
-        if isinstance(self.swin_transformer, SwinTransformerV2):
-            stem_feats = self.conv_stem(x, x.shape[1:3])
-            outs += stem_feats
+        stem_feats = self.conv_stem(x, x.shape[1:3])
+        outs += stem_feats
 
         transformer_outs, resolutions = self.swin_transformer(x)
         self.norm_transformer_outputs(n_samples, outs, transformer_outs, resolutions)
-
         return self.neck(outs)
 
     def norm_transformer_outputs(self, n_samples, outs, transformer_outs, resolutions):
@@ -91,8 +93,7 @@ class DepthFormerEncode(nn.Module):
             o = transformer_outs[i]
             r = resolutions[i]
 
-            no = self.norms[i](o)
-            no = no.view(n_samples, r[0], r[1], -1).permute(0, 3, 1, 2).contiguous()            
+            no = self.norms[i](o.view(n_samples, r[0], r[1], -1).permute(0, 3, 1, 2).contiguous())
             outs.append(no)
 
 
@@ -150,22 +151,6 @@ class DepthFormer(nn.Module):
         super().__init__()
 
         self.encode = DepthFormerEncode(in_channels, requires_grad=requires_grad)
-        self.decode = DepthFormerDecode(in_channels=self.encode.list_feats, requires_grad=requires_grad)
-        self.list_feats = self.encode.list_feats
-
-    def extract_feats(self, x):
-        return self.decode.extract_feats(self.encode(x))
-
-    def forward(self, x):
-        feats = self.encode(x)
-        return self.decode(feats)
-
-
-class DepthEfficient(nn.Module):
-    def __init__(self, requires_grad=True):
-        super().__init__()
-
-        self.encode = EfficientEncode(requires_grad=requires_grad)
         self.decode = DepthFormerDecode(in_channels=self.encode.list_feats, requires_grad=requires_grad)
         self.list_feats = self.encode.list_feats
 

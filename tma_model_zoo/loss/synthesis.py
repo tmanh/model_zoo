@@ -100,6 +100,7 @@ class MatterportLoss(nn.Module):
                 loss_refine += self.si(refine[i], gt_depth_hr)
         # """
 
+        """
         if coarse is not None:
             for i in range(len(coarse)):
                 if refine[i].shape[-2] != gt_depth_hr.shape[-2] or refine[i].shape[-1] != gt_depth_hr.shape[-1]:
@@ -107,6 +108,7 @@ class MatterportLoss(nn.Module):
                     loss_refine += self.si(coarse[i], tmp)
                 else:
                     loss_refine += self.si(coarse[i], gt_depth_hr)
+        """
 
         if not isinstance(loss_refine, float) and not isinstance(loss_refine, int)  and torch.isnan(loss_refine):
             loss_refine = 0.0

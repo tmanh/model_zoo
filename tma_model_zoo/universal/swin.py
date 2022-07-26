@@ -359,10 +359,13 @@ class SwinTransformerBlock(nn.Module):
         self.compute_attn_mask((H_pad, W_pad), device=x.device)
 
         # Step 1: compute shift offsets if cyclic shift is needed
+        # """
         if self.shift_size > 0:
             shifted_x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
         else:
             shifted_x = x
+        # """
+        # shifted_x = x
 
         # Step 2: partition windows (extracting the non-overlapping windows)
         x_windows = window_partition(shifted_x, self.window_size)  # nW*B, window_size, window_size, C
@@ -497,10 +500,13 @@ class SwinTransformerBlockA(nn.Module):
         self.compute_attn_mask((H_pad, W_pad), device=x.device)
 
         # Step 1: compute shift offsets if cyclic shift is needed
+        # shifted_x = x
+        # """
         if self.shift_size > 0:
             shifted_x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(2, 3))
         else:
             shifted_x = x
+        # """
 
         # Step 2: partition windows (extracting the non-overlapping windows)
         x_windows = window_partitionA(shifted_x, self.window_size)  # nW*B, window_size, window_size, C
@@ -973,8 +979,8 @@ class SwinTransformerA(nn.Module):
         # build layers
         self.layers = nn.ModuleList()
         for i_layer in range(self.num_layers):
-            layer = SwinTransformerLayerA(dim=int(self.list_feats[i_layer + 2]), depth=depths[i_layer], num_heads=num_heads[i_layer], window_size=window_size, mlp_ratio=self.mlp_ratio,
-                                          qkv_bias=qkv_bias, norm_layer=norm_layer, downsample=PatchMergingA if (i_layer < self.num_layers - 1) else None, requires_grad=requires_grad)
+            layer = SwinTransformerLayer(dim=int(self.list_feats[i_layer + 2]), depth=depths[i_layer], num_heads=num_heads[i_layer], window_size=window_size, mlp_ratio=self.mlp_ratio,
+                                         qkv_bias=qkv_bias, norm_layer=norm_layer, downsample=PatchMergingA if (i_layer < self.num_layers - 1) else None, requires_grad=requires_grad)
             self.layers.append(layer)
 
         self.apply(self._init_weights)

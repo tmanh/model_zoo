@@ -124,6 +124,8 @@ class HAHIHetero(nn.Module):
             self.conv_positional_encoding.eval()
             self.multi_att.eval()
             self.self_attn.eval()
+
+        self.init_weights()
         
     # init weight
     def init_weights(self):

@@ -159,7 +159,7 @@ class GuidedUnet(nn.Module):
 
 
 class GuidedEfficientNet(nn.Module):
-    def __init__(self, n_feats=64, act=nn.ReLU(inplace=True), mode='rgb-m', backbone='efficientnet-b4', enc_in_channels = None, mask_channels=16, n_resblocks=8, requires_grad=True):
+    def __init__(self, n_feats=64, act=nn.ReLU(inplace=True), mode='rgb-m', backbone='efficientnet-b4', enc_in_channels = None, mask_channels=16, n_resblocks=8, requires_grad=True, neck=False):
         if enc_in_channels is None:
             enc_in_channels = [48, 32, 56, 160, 448]
         super().__init__()
@@ -226,6 +226,8 @@ class GuidedEfficientNet(nn.Module):
             guidance_feats = self.backbone(color)[::-1]
             mask_feats = self.compute_mask_feats(mask)
             guidance_feats = [guidance_feats[i] * mask_feats[i] for i in range(len(mask_feats))]
+            for g in guidance_feats:
+                print(g.shape)
         else:
             guidance_feats = self.backbone(torch.cat([color, depth], dim=1))[::-1]
 
