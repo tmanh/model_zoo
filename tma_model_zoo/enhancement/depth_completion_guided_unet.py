@@ -4,9 +4,12 @@ import time
 import torch
 import torch.nn as nn
 
+
+
 from ..basics.dynamic_conv import DynamicConv2d
 from ..basics.upsampling import Upscale
 from ..universal.efficient import EfficientNet
+from ..universal.hahi import HAHIHetero
 from ..universal.resnet import Resnet
 from .base import *
 
@@ -159,7 +162,7 @@ class GuidedUnet(nn.Module):
 
 
 class GuidedEfficientNet(nn.Module):
-    def __init__(self, n_feats=64, act=nn.ReLU(inplace=True), mode='rgb-m', backbone='efficientnet-b4', enc_in_channels = None, mask_channels=16, n_resblocks=8, requires_grad=True, neck=False):
+    def __init__(self, n_feats=64, act=nn.ReLU(inplace=True), mode='rgb-m', backbone='efficientnet-b4', enc_in_channels = None, mask_channels=16, n_resblocks=8, requires_grad=True, neck=True):
         if enc_in_channels is None:
             enc_in_channels = [48, 32, 56, 160, 448]
         super().__init__()
@@ -173,6 +176,10 @@ class GuidedEfficientNet(nn.Module):
         self.betas = nn.ModuleList([DynamicConv2d(i, n_feats, norm_cfg=None, act=act, requires_grad=requires_grad) for i in enc_in_channels][::-1])
         self.downs = nn.ModuleList([ConvBlock(n_feats, n_feats, requires_grad=requires_grad) for _ in enc_in_channels])
         self.ups = nn.ModuleList([ConvBlock(n_feats, n_feats, down_size=False, requires_grad=requires_grad) for _ in enc_in_channels])
+
+        self.list_feats = enc_in_channels[::-1]
+        if neck:
+            self.neck = HAHIHetero(in_channels=self.list_feats, out_channels=self.list_feats, embedding_dim=256, num_feature_levels=len(self.list_feats), requires_grad=requires_grad)
 
         self.n_output = 1
 
@@ -224,12 +231,14 @@ class GuidedEfficientNet(nn.Module):
 
         if 'rgb-m' in self.mode:
             guidance_feats = self.backbone(color)[::-1]
+            if self.neck:
+                guidance_feats = self.neck(guidance_feats)
             mask_feats = self.compute_mask_feats(mask)
             guidance_feats = [guidance_feats[i] * mask_feats[i] for i in range(len(mask_feats))]
-            for g in guidance_feats:
-                print(g.shape)
         else:
             guidance_feats = self.backbone(torch.cat([color, depth], dim=1))[::-1]
+            if self.neck:
+                guidance_feats = self.neck(guidance_feats)
 
         up_feats = shallow_feats + self.compute_upscaled_feats(depth_feats, guidance_feats, height, width)
         out = self.out_net(up_feats)
