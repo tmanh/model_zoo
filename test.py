@@ -14,14 +14,14 @@ import torch
 # from tma_model_zoo.universal.efficient import EfficientNet
 from tma_model_zoo.enhancement.cspn_fusion import generate_average_kernel, BaseCSPNFusion
 
-model = BaseCSPNFusion(n_feats=3).cuda()
+from tma_model_zoo.universal.light_swin import SwinTransformerL
 
-guidance_feats =  torch.zeros((1, 3, 5, 5)).cuda()
-guided_depth = torch.zeros((1, 1, 5, 5)).cuda()
-coarse_depth = torch.zeros((1, 1, 5, 5)).cuda()
-valid = torch.zeros((1, 1, 5, 5)).cuda()
-x = model(guidance_feats, guided_depth, coarse_depth, valid)
-print(x.shape)
+model = SwinTransformerL()
+
+color =  torch.zeros((1, 3, 256, 256))
+feats, _ = model(color)
+for f in feats:
+    print(f.shape)
 # test()
 
 # x(torch.zeros((1, 3, 480, 640)).cuda())
