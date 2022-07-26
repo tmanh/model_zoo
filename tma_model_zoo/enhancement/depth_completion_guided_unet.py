@@ -89,7 +89,7 @@ class GuidedUnetBasic(nn.Module):
 
 
 class GuidedUnet(nn.Module):
-    def __init__(self, color_enc_in_channels=None, depth_enc_in_channels=None, enc_out_channels=None, requires_grad=True, mask_channels=16):
+    def __init__(self, color_enc_in_channels=None, depth_enc_in_channels=None, enc_out_channels=None, requires_grad=True, mask_channels=16, neck=True):
         if color_enc_in_channels is None:
             color_enc_in_channels = [3, 16, 32, 64, 128, 256]
         if depth_enc_in_channels is None:
@@ -105,6 +105,10 @@ class GuidedUnet(nn.Module):
 
         self.depth_conv = UnetAttentionDownBLock(requires_grad=requires_grad)
         self.depth_mid_conv = self.create_bottleneck(requires_grad=requires_grad)
+
+        self.list_feats = enc_out_channels
+        if neck:
+            self.neck = HAHIHetero(in_channels=self.list_feats, out_channels=self.list_feats, embedding_dim=256, num_feature_levels=len(self.list_feats), requires_grad=requires_grad)
 
         up_in_channels = enc_out_channels[1:]
         up_out_channels = depth_enc_in_channels[1:]
@@ -129,6 +133,10 @@ class GuidedUnet(nn.Module):
         start = time.time()
         m_feats = self.mask_conv(mask)
         c_feats_1, c_feats_2, c_feats_3, c_feats_4, c_feats_5, c_feats_6 = self.color_conv(color)
+
+        if self.neck:
+            c_feats_1, c_feats_2, c_feats_3, c_feats_4, c_feats_5, c_feats_6 = self.neck([c_feats_1, c_feats_2, c_feats_3, c_feats_4, c_feats_5, c_feats_6])
+
         d_feats_1, d_feats_2, d_feats_3, d_feats_4, d_feats_5, d_feats_6 = self.depth_conv(depth, m_feats)
 
         c_feats_8, d_feats_8 = self.bottleneck(c_feats_6, d_feats_6)
