@@ -107,6 +107,7 @@ class GuidedUnet(nn.Module):
         self.depth_mid_conv = self.create_bottleneck(requires_grad=requires_grad)
 
         self.list_feats = enc_out_channels
+        self.neck = None
         if neck:
             self.neck = HAHIHetero(in_channels=self.list_feats, out_channels=self.list_feats, embedding_dim=256, num_feature_levels=len(self.list_feats), requires_grad=requires_grad)
 
@@ -186,6 +187,7 @@ class GuidedEfficientNet(nn.Module):
         self.ups = nn.ModuleList([ConvBlock(n_feats, n_feats, down_size=False, requires_grad=requires_grad) for _ in enc_in_channels])
 
         self.list_feats = enc_in_channels[::-1]
+        self.neck = None
         if neck:
             self.neck = HAHIHetero(in_channels=self.list_feats, out_channels=self.list_feats, embedding_dim=256, num_feature_levels=len(self.list_feats), requires_grad=requires_grad)
 
