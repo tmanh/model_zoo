@@ -1,27 +1,44 @@
 import time
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as functional
 
 from ..universal.resnet import Resnet
 from ..enhancement.base import ConvBlock
 from ..basics.upsampling import Upscale
 from ..basics.dynamic_conv import DynamicConv2d
-from ..monocular_depth.depthformer import DepthFormer, DepthFormerEncode
+from ..monocular_depth.mine_depthformer import DepthFormer, DepthFormerEncode
 
 from .base_guided import BaseFusion, DepthEncoder
 from .cspn_fusion import CSPNFusion
+
+from ..monocular_depth.depthformer import build_depther_from
+from mmcv.runner import load_checkpoint
 
 
 class TransformerGuided(nn.Module):
     def __init__(self, n_feats=64, mask_channels=16, n_resblocks=8, act=nn.GELU(), model='rgb-m', requires_grad=True):
         super().__init__()
 
-        self.mode = 'completion'  # estimate, completion
+        self.min_d = 0.0
+        self.max_d = 20.0
+
+        self.mode = 'estimate'  # estimate, completion
         self.model = model
 
+        self.flag = True
+        if self.flag:
+            self.depth_from_color = build_depther_from('/scratch/antruong/workspace/myspace/model_zoo/tma_model_zoo/universal/configs/depthformer/depthformer_swint_w7_nyu.py').cuda()  # DepthFormerSwin()
+            load_checkpoint(self.depth_from_color, '/scratch/antruong/workspace/myspace/model_zoo/pretrained/depthformer_swint_w7_nyu.pth', map_location='cpu')
+        else:
+            self.depth_from_color = build_depther_from('/scratch/antruong/workspace/myspace/model_zoo/tma_model_zoo/universal/configs/binsformer/binsformer_swint_w7_nyu.py').cuda()  # DepthFormerSwin()
+            load_checkpoint(self.depth_from_color, '/scratch/antruong/workspace/myspace/model_zoo/pretrained/binsformer_swint_nyu_converted.pth', map_location='cpu')
+        self.depth_from_color.min_depth = self.min_d
+        self.depth_from_color.max_depth = self.max_d
+        # self.depth_from_color.eval()
+
         # self.depth_from_color = DepthFormerEncode(requires_grad=True)
-        self.depth_from_color = DepthFormer(requires_grad=True)
+        # self.depth_from_color = DepthFormer(requires_grad=True)
 
         self.list_feats = self.depth_from_color.list_feats
 
@@ -75,7 +92,12 @@ class TransformerGuided(nn.Module):
         return feats[::-1]
 
     def estimate(self, color_lr):
-        return self.depth_from_color(color_lr)
+        if self.flag:
+            o = self.depth_from_color.simple_run(color_lr)
+        else:
+            o = self.depth_from_color.simple_run(color_lr)[0][-1]
+        # o = (o - o.min()) / (o.max() - o.min()) * self.max_d
+        return [functional.interpolate(o, size=(color_lr.shape[-2:]), align_corners=False, mode='bilinear')]
 
     def extract_feats(self, depth_lr, color_lr):
         estimated, cfeats = self.depth_from_color.extract_feats(color_lr)
@@ -86,7 +108,7 @@ class TransformerGuided(nn.Module):
     def forward(self, depth_lr, depth_bicubic, color_lr, mask_lr):
         start = time.time()
         if self.mode == 'estimate':
-            estimated = self.depth_from_color(color_lr)
+            estimated = self.estimate(color_lr)
             return None, estimated, time.time() - start
         else:
             _, _, height, width = depth_lr.shape

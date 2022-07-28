@@ -1,162 +1,176 @@
-from turtle import forward
 import torch
-import torch.nn as nn
-import torch.nn.functional as functional
 
-from ..universal.resnet import Resnet
+from mmcv.utils import Config
 
-from ..enhancement.depth_completion_guided_unet import StageEfficientNet
+from .base_predictor import BaseDepther
 
-from ..basics.dynamic_conv import DynamicConv2d, UpSample, UpSampleResidual, DownSample
-from ..basics.norm import NormBuilder
-from ..universal.swin import SwinTransformerV2, SwinTransformerA
-from ..universal.hahi import HAHIHetero
+from ..universal.depthformer_utils import add_prefix, resize
+from ..universal.depthformer_basics import DEPTHER, build_depther, build_head, build_neck, build_backbone
 
 
-class EfficientEncode(nn.Module):
-    def __init__(self, backbone='efficientnet-b4', requires_grad=True):
-        super().__init__()
+def build_depther_from(path):
+    cfg = Config.fromfile(path)
+    return build_depther(cfg.model)
 
-        self.list_feats = [32, 48, 32, 56, 160, 448]
-        self.stem = DynamicConv2d(3, 32)
-        self.backbone = StageEfficientNet.from_pretrained(backbone, in_channels=3, requires_grad=False)
 
-        for module in self.backbone.modules():
-            if isinstance(module, nn.BatchNorm2d):
-                module.momentum = 0
-                module.eval()
-            for param in module.parameters():
-                param.requires_grad = False
+@DEPTHER.register_module()
+class DepthEncoderDecoder(BaseDepther):
+    """Encoder Decoder depther.
+    EncoderDecoder typically consists of backbone, (neck) and decode_head.
+    """
 
-        for param in self.backbone.parameters():
-            param.requires_grad = False
+    def __init__(self, backbone, decode_head, neck=None, train_cfg=None, test_cfg=None, pretrained=None, init_cfg=None):
+        super(DepthEncoderDecoder, self).__init__(init_cfg)
+        if pretrained is not None:
+            assert backbone.get('pretrained') is None, 'both backbone and depther set pretrained weight'
+            backbone.pretrained = pretrained
+        self.backbone = build_backbone(backbone)
+        self._init_decode_head(decode_head)
 
-        self.neck = HAHIHetero(in_channels=self.list_feats, out_channels=self.list_feats, embedding_dim=256, num_feature_levels=len(self.list_feats), requires_grad=requires_grad)
+        self.list_feats = self.backbone.list_feats
+
+        if neck is not None:
+            self.neck = build_neck(neck)
+
+        self.train_cfg = train_cfg
+        self.test_cfg = test_cfg
+
+        assert self.with_decode_head
+
+    def _init_decode_head(self, decode_head):
+        """Initialize ``decode_head``"""
+        self.decode_head = build_head(decode_head)
+        self.align_corners = self.decode_head.align_corners
+
+    def extract_feat(self, img):
+        """Extract features from images."""
+        x = self.backbone(img)
+        if self.with_neck:
+            x = self.neck(x)
+        return x
+
+    def simple_run(self, img):
+        x = self.extract_feat(img)
+        return self.decode_head(x)
+
+    def encode_decode(self, img, img_metas, rescale=True):
+        """Encode images with backbone and decode into a depth estimation
+        map of the same size as input."""
         
-    def forward(self, color):
-        shallow_feats = self.stem(color)
-        deep_feats = self.backbone(color)
-        return self.neck([shallow_feats,]+deep_feats)
+        x = self.extract_feat(img)
+        out = self._decode_head_forward_test(x, img_metas)
+        
+        # crop the pred depth to the certain range.
+        out = torch.clamp(out, min=self.decode_head.min_depth, max=self.decode_head.max_depth)
+        if rescale:
+            out = resize(input=out, size=img.shape[2:], mode='bilinear', align_corners=self.align_corners)
+        return out
 
+    def _decode_head_forward_train(self, img, x, img_metas, depth_gt, **kwargs):
+        """Run forward function and calculate loss for decode head in
+        training."""
+        losses = {}
+        loss_decode = self.decode_head.forward_train(img, x, img_metas, depth_gt, self.train_cfg, **kwargs)
+        losses.update(add_prefix(loss_decode, 'decode'))
+        return losses
 
-class DepthFormerStem(nn.Module):
-    def __init__(self, in_dim, out_dims, requires_grad=True):
-        super().__init__()
+    def _decode_head_forward_test(self, x, img_metas):
+        """Run forward function and calculate loss for decode head in
+        inference."""
+        return self.decode_head.forward_test(x, img_metas, self.test_cfg)
 
-        self.conv1 = DynamicConv2d(in_dim, out_dims[0], kernel_size=7, stride=1, bias=False, requires_grad=requires_grad)
-        self.conv2 = DownSample(out_dims[0], out_dims[1], requires_grad=requires_grad)
+    def forward_dummy(self, img):
+        """Dummy forward function."""
+        return self.encode_decode(img, None)
 
-    def forward(self, x):
-        x1 = self.conv1(x)
-        x2 = self.conv2(x1)
-        return x1, x2
+    def forward_train(self, img, img_metas, depth_gt, **kwargs):
+        """Forward function for training.
+        Args:
+            img (Tensor): Input images.
+            img_metas (list[dict]): List of image info dict where each dict
+                has: 'img_shape', 'scale_factor', 'flip', and may also contain
+                'filename', 'ori_shape', 'pad_shape', and 'img_norm_cfg'.
+                For details on the values of these keys see
+                `depth/datasets/pipelines/formatting.py:Collect`.
+            depth_gt (Tensor): Depth gt
+                used if the architecture supports depth estimation task.
+        Returns:
+            dict[str, Tensor]: a dictionary of loss components
+        """
 
+        x = self.extract_feat(img)
 
-class DepthFormerEncode(nn.Module):
-    def __init__(self, in_channels=3, requires_grad=True):
-        super().__init__()
-        self.swin_transformer = SwinTransformerV2(in_channels=in_channels, requires_grad=False)
-        self.swin_transformer.load_pretrained()
+        losses = {}
 
-        if isinstance(self.swin_transformer, SwinTransformerV2):
-            self.nfeats = [32, 64]
-            self.stem = DepthFormerStem(in_channels, self.nfeats, requires_grad=requires_grad)
+        # the last of x saves the info from neck
+        loss_decode = self._decode_head_forward_train(img, x, img_metas, depth_gt, **kwargs)
 
-        self.list_feats = self.swin_transformer.list_feats
-        self.norms = nn.ModuleList([NormBuilder.build(cfg=dict(type='BN2d', requires_grad=requires_grad), num_features=f) for f in self.list_feats])
+        losses.update(loss_decode)
 
-        if isinstance(self.swin_transformer, SwinTransformerV2):
-            self.list_feats = self.nfeats + self.list_feats
-        self.neck = HAHIHetero(in_channels=self.list_feats, out_channels=self.list_feats, embedding_dim=256, num_feature_levels=len(self.list_feats), requires_grad=requires_grad)
+        return losses
 
-    def conv_stem(self, x, resolution):
-        if x.shape[1:3] != resolution:
-            x = functional.interpolate(x, size=resolution, mode='bilinear', align_corners=True)
-        return self.stem(x)
+    def whole_inference(self, img, img_meta, rescale):
+        """Inference with full image."""
+        return self.encode_decode(img, img_meta, rescale)
 
-    def extract_feats(self, x):
-        return self.forward(x)
+    def inference(self, img, img_meta, rescale):
+        """Inference with slide/whole style.
+        Args:
+            img (Tensor): The input image of shape (N, 3, H, W).
+            img_meta (dict): Image info dict where each dict has: 'img_shape',
+                'scale_factor', 'flip', and may also contain
+                'filename', 'ori_shape', 'pad_shape', and 'img_norm_cfg'.
+                For details on the values of these keys see
+                `depth/datasets/pipelines/formatting.py:Collect`.
+            rescale (bool): Whether rescale back to original shape.
+        Returns:
+            Tensor: The output depth map.
+        """
 
-    def forward(self, x):
-        n_samples = x.shape[0]
+        assert self.test_cfg.mode in ['slide', 'whole']
+        ori_shape = img_meta[0]['ori_shape']
+        assert all(_['ori_shape'] == ori_shape for _ in img_meta)
+        if self.test_cfg.mode == 'slide':
+            raise NotImplementedError
+        else:
+            depth_pred = self.whole_inference(img, img_meta, rescale)
+        output = depth_pred
 
-        outs = []
-        stem_feats = self.conv_stem(x, x.shape[1:3])
-        outs += stem_feats
+        if img_meta[0]['flip']:
+            flip_direction = img_meta[0]['flip_direction']
+            assert flip_direction in ['horizontal', 'vertical']
+            if flip_direction == 'horizontal':
+                output = output.flip(dims=(3, ))
+            elif flip_direction == 'vertical':
+                output = output.flip(dims=(2, ))
 
-        transformer_outs, resolutions = self.swin_transformer(x)
-        self.norm_transformer_outputs(n_samples, outs, transformer_outs, resolutions)
-        return self.neck(outs)
+        return output
 
-    def norm_transformer_outputs(self, n_samples, outs, transformer_outs, resolutions):
-        for i in range(len(transformer_outs)):
-            o = transformer_outs[i]
-            r = resolutions[i]
+    def simple_test(self, img, img_meta, rescale=True):
+        """Simple test with single image."""
+        depth_pred = self.inference(img, img_meta, rescale)
+        if torch.onnx.is_in_onnx_export():
+            # our inference backend only support 4D output
+            depth_pred = depth_pred.unsqueeze(0)
+            return depth_pred
+        depth_pred = depth_pred.cpu().numpy()
+        # unravel batch dim
+        depth_pred = list(depth_pred)
+        return depth_pred
 
-            no = self.norms[i](o.view(n_samples, r[0], r[1], -1).permute(0, 3, 1, 2).contiguous())
-            outs.append(no)
-
-
-class DepthFormerDecode(nn.Module):
-    min_depth = 0.01
-
-    def __init__(self, in_channels, norm_cfg=None, act=nn.ReLU(inplace=True), requires_grad=True):
-        super().__init__()
-
-        self.in_channels = in_channels[::-1]
-        self.up_sample_channels = in_channels[::-1]
-
-        self.norm_cfg = norm_cfg
-        self.act = act
-        self.relu = nn.ReLU(inplace=True)
-
-        self.conv_list = nn.ModuleList()
-        self.conv_depth = nn.ModuleList()
-
-        for index, (in_channel, up_channel) in enumerate(zip(self.in_channels, self.up_sample_channels)):
-            if index == 0:
-                self.conv_list.append(DynamicConv2d(in_channels=in_channel, out_channels=up_channel, kernel_size=1, stride=1, norm_cfg=None, act=None, requires_grad=requires_grad))
-            else:
-                self.conv_list.append(UpSample(skip_input=in_channel + up_channel_temp, output_features=up_channel, norm_cfg=self.norm_cfg, act=self.act, requires_grad=requires_grad))
-
-            self.conv_depth.append(nn.Conv2d(up_channel, 1, kernel_size=3, padding=1, stride=1))
-
-            # save earlier fusion target
-            up_channel_temp = up_channel
-
-        for cd in self.conv_depth:
-            for param in cd.parameters():
-                param.requires_grad = requires_grad
-
-    def extract_feats(self, inputs):
-        temp_feat_list = []
-        for index, feat in enumerate(inputs[::-1]):
-            if index == 0:
-                temp_feat = self.conv_list[index](feat)
-            else:
-                skip_feat = feat
-                up_feat = temp_feat_list[index-1]
-                temp_feat = self.conv_list[index](up_feat, skip_feat)
-            temp_feat_list.append(temp_feat)
-
-        return [self.relu(self.conv_depth[-1](temp_feat_list[-1]))], temp_feat_list
-
-    def forward(self, inputs):
-        _, temp_feat_list = self.extract_feats(inputs)
-        return [self.relu(self.conv_depth[i](temp_feat_list[i])) for i in range(len(temp_feat_list))]
-
-
-class DepthFormer(nn.Module):
-    def __init__(self, in_channels=3, requires_grad=True):
-        super().__init__()
-
-        self.encode = DepthFormerEncode(in_channels, requires_grad=requires_grad)
-        self.decode = DepthFormerDecode(in_channels=self.encode.list_feats, requires_grad=requires_grad)
-        self.list_feats = self.encode.list_feats
-
-    def extract_feats(self, x):
-        return self.decode.extract_feats(self.encode(x))
-
-    def forward(self, x):
-        feats = self.encode(x)
-        return self.decode(feats)
+    def aug_test(self, imgs, img_metas, rescale=True):
+        """Test with augmentations.
+        Only rescale=True is supported.
+        """
+        # aug_test rescale all imgs back to ori_shape for now
+        assert rescale
+        # to save memory, we get augmented depth logit inplace
+        depth_pred = self.inference(imgs[0], img_metas[0], rescale)
+        for i in range(1, len(imgs)):
+            cur_depth_pred = self.inference(imgs[i], img_metas[i], rescale)
+            depth_pred += cur_depth_pred
+        depth_pred /= len(imgs)
+        depth_pred = depth_pred.cpu().numpy()
+        # unravel batch dim
+        depth_pred = list(depth_pred)
+        return depth_pred

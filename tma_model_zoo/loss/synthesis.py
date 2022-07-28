@@ -1,11 +1,7 @@
-from cmath import isnan
 import itertools
-import cv2
 import torch
 import torch.nn as nn
 import torch.nn.functional as functional
-
-import numpy as np
 
 
 class SILogLoss(nn.Module):  # Main loss function used in AdaBins paper

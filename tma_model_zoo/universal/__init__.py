@@ -10,7 +10,11 @@ from .efficient_resnet import *
 from .snet import *
 from .residual_gru import *
 from .drop import *
-from .swin import *
 from .dmsa import *
 from .weight_init import *
 from .helpers import *
+
+from .swin import SwinTransformerV2
+from .light_swin import SwinTransformerL
+from .binsformer_swin import SwinTransformer
+from .depthformer_swin import DepthFormerSwin

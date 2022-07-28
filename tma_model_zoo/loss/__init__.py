@@ -4,6 +4,7 @@ import numpy as np
 from .adversarial import *
 from .basics import *
 from .synthesis import *
+from .depthformer_loss import *
 
 
 class Loss(nn.modules.loss._Loss):

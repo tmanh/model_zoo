@@ -5,11 +5,10 @@ from torch.nn.init import xavier_uniform_, constant_, normal_
 import math
 import torch
 
+from ..universal.depthformer_basics import SinePositionalEncoding
 from ..basics.dynamic_conv import DynamicConv2d
 
 from .weight_init import xavier_init
-from .positional_encoding import SinePositionalEncoding
-
 from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttention
 
 
