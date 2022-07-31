@@ -25,9 +25,10 @@ class DepthEncoderDecoder(BaseDepther):
             assert backbone.get('pretrained') is None, 'both backbone and depther set pretrained weight'
             backbone.pretrained = pretrained
         self.backbone = build_backbone(backbone)
-        self._init_decode_head(decode_head)
+        self._init_decoder(decode_head)
 
-        self.list_feats = self.backbone.list_feats
+        self.list_feats = self.decode_head.in_channels[::-1]
+        self.level2full = self.decode_head.level2full
 
         if neck is not None:
             self.neck = build_neck(neck)
@@ -37,27 +38,26 @@ class DepthEncoderDecoder(BaseDepther):
 
         assert self.with_decode_head
 
-    def _init_decode_head(self, decode_head):
-        """Initialize ``decode_head``"""
+    def _init_decoder(self, decode_head):
         self.decode_head = build_head(decode_head)
         self.align_corners = self.decode_head.align_corners
 
-    def extract_feat(self, img):
-        """Extract features from images."""
+    def encode(self, img):
         x = self.backbone(img)
         if self.with_neck:
             x = self.neck(x)
         return x
 
     def simple_run(self, img):
-        x = self.extract_feat(img)
+        x = self.encode(img)
         return self.decode_head(x)
 
+    def extract_feats(self, img):
+        x = self.encode(img)
+        return self.decode_head(x), x
+
     def encode_decode(self, img, img_metas, rescale=True):
-        """Encode images with backbone and decode into a depth estimation
-        map of the same size as input."""
-        
-        x = self.extract_feat(img)
+        x = self.encode(img)
         out = self._decode_head_forward_test(x, img_metas)
         
         # crop the pred depth to the certain range.
@@ -87,18 +87,14 @@ class DepthEncoderDecoder(BaseDepther):
         """Forward function for training.
         Args:
             img (Tensor): Input images.
-            img_metas (list[dict]): List of image info dict where each dict
-                has: 'img_shape', 'scale_factor', 'flip', and may also contain
-                'filename', 'ori_shape', 'pad_shape', and 'img_norm_cfg'.
-                For details on the values of these keys see
-                `depth/datasets/pipelines/formatting.py:Collect`.
-            depth_gt (Tensor): Depth gt
-                used if the architecture supports depth estimation task.
+            img_metas (list[dict]): List of image info dict where each dict has: 'img_shape', 'scale_factor', 'flip', and may also contain
+                'filename', 'ori_shape', 'pad_shape', and 'img_norm_cfg'. For details on the values of these keys see `depth/datasets/pipelines/formatting.py:Collect`.
+            depth_gt (Tensor): Depth gt used if the architecture supports depth estimation task.
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
 
-        x = self.extract_feat(img)
+        x = self.encode(img)
 
         losses = {}
 
@@ -117,11 +113,8 @@ class DepthEncoderDecoder(BaseDepther):
         """Inference with slide/whole style.
         Args:
             img (Tensor): The input image of shape (N, 3, H, W).
-            img_meta (dict): Image info dict where each dict has: 'img_shape',
-                'scale_factor', 'flip', and may also contain
-                'filename', 'ori_shape', 'pad_shape', and 'img_norm_cfg'.
-                For details on the values of these keys see
-                `depth/datasets/pipelines/formatting.py:Collect`.
+            img_meta (dict): Image info dict where each dict has: 'img_shape', 'scale_factor', 'flip', and may also contain
+                'filename', 'ori_shape', 'pad_shape', and 'img_norm_cfg'. For details on the values of these keys see `depth/datasets/pipelines/formatting.py:Collect`.
             rescale (bool): Whether rescale back to original shape.
         Returns:
             Tensor: The output depth map.
@@ -171,6 +164,7 @@ class DepthEncoderDecoder(BaseDepther):
             depth_pred += cur_depth_pred
         depth_pred /= len(imgs)
         depth_pred = depth_pred.cpu().numpy()
+        
         # unravel batch dim
         depth_pred = list(depth_pred)
         return depth_pred

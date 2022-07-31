@@ -494,77 +494,37 @@ class SwinBlockSequence(BaseModule):
 @BACKBONES.register_module()
 class SwinTransformer(BaseModule):
     """ Swin Transformer
-    A PyTorch implement of : `Swin Transformer:
-    Hierarchical Vision Transformer using Shifted Windows`  -
-        https://arxiv.org/abs/2103.14030
+    A PyTorch implement of : `Swin Transformer: Hierarchical Vision Transformer using Shifted Windows` - https://arxiv.org/abs/2103.14030
 
-    Inspiration from
-    https://github.com/microsoft/Swin-Transformer
+    Inspiration from https://github.com/microsoft/Swin-Transformer
 
     Args:
-        pretrain_img_size (int | tuple[int]): The size of input image when
-            pretrain. Defaults: 224.
-        in_channels (int): The num of input channels.
-            Defaults: 3.
+        pretrain_img_size (int | tuple[int]): The size of input image when pretrain. Defaults: 224.
+        in_channels (int): The num of input channels. Defaults: 3.
         embed_dims (int): The feature dimension. Default: 96.
         patch_size (int | tuple[int]): Patch size. Default: 4.
         window_size (int): Window size. Default: 7.
-        mlp_ratio (float): Ratio of mlp hidden dim to embedding dim.
-            Default: 4.
-        depths (tuple[int]): Depths of each Swin Transformer stage.
-            Default: (2, 2, 6, 2).
-        num_heads (tuple[int]): Parallel attention heads of each Swin
-            Transformer stage. Default: (3, 6, 12, 24).
-        strides (tuple[int]): The patch merging or patch embedding stride of
-            each Swin Transformer stage. (In swin, we set kernel size equal to
-            stride.) Default: (4, 2, 2, 2).
-        out_indices (tuple[int]): Output from which stages.
-            Default: (0, 1, 2, 3).
-        qkv_bias (bool, optional): If True, add a learnable bias to query, key,
-            value. Default: True
-        qk_scale (float | None, optional): Override default qk scale of
-            head_dim ** -0.5 if set. Default: None.
-        patch_norm (bool): If add a norm layer for patch embed and patch
-            merging. Default: True.
+        mlp_ratio (float): Ratio of mlp hidden dim to embedding dim. Default: 4.
+        depths (tuple[int]): Depths of each Swin Transformer stage. Default: (2, 2, 6, 2).
+        num_heads (tuple[int]): Parallel attention heads of each Swin Transformer stage. Default: (3, 6, 12, 24).
+        strides (tuple[int]): The patch merging or patch embedding stride of each Swin Transformer stage. (In swin, we set kernel size equal to stride.) Default: (4, 2, 2, 2).
+        out_indices (tuple[int]): Output from which stages. Default: (0, 1, 2, 3).
+        qkv_bias (bool, optional): If True, add a learnable bias to query, key, value. Default: True
+        qk_scale (float | None, optional): Override default qk scale of head_dim ** -0.5 if set. Default: None.
+        patch_norm (bool): If add a norm layer for patch embed and patch merging. Default: True.
         drop_rate (float): Dropout rate. Defaults: 0.
         attn_drop_rate (float): Attention dropout rate. Default: 0.
         drop_path_rate (float): Stochastic depth rate. Defaults: 0.1.
-        use_abs_pos_embed (bool): If True, add absolute position embedding to
-            the patch embedding. Defaults: False.
-        act_cfg (dict): Config dict for activation layer.
-            Default: dict(type='LN').
-        norm_cfg (dict): Config dict for normalization layer at
-            output of backone. Defaults: dict(type='LN').
-        pretrain_style (str): Choose to use official or mmcls pretrain weights.
-            Default: official.
-        pretrained (str, optional): model pretrained path. Default: None.
-        init_cfg (dict, optional): The Config for initialization.
-            Defaults to None.
+        use_abs_pos_embed (bool): If True, add absolute position embedding to the patch embedding. Defaults: False.
+        act_cfg (dict): Config dict for activation layer. Default: dict(type='LN').
+        norm_cfg (dict): Config dict for normalization layer at output of backone. Defaults: dict(type='LN').
+        pretrain_style (str): Choose to use official or mmcls pretrain weights. Default: official.
+        pretrained (str, optional): model pretrained path. Default: None. init_cfg (dict, optional): The Config for initialization. Defaults to None.
     """
 
-    def __init__(self,
-                 pretrain_img_size=224,
-                 in_channels=3,
-                 embed_dims=96,
-                 patch_size=4,
-                 window_size=7,
-                 mlp_ratio=4,
-                 depths=(2, 2, 6, 2),
-                 num_heads=(3, 6, 12, 24),
-                 strides=(4, 2, 2, 2),
-                 out_indices=(0, 1, 2, 3),
-                 qkv_bias=True,
-                 qk_scale=None,
-                 patch_norm=True,
-                 drop_rate=0.,
-                 attn_drop_rate=0.,
-                 drop_path_rate=0.1,
-                 use_abs_pos_embed=False,
-                 act_cfg=dict(type='GELU'),
-                 norm_cfg=dict(type='LN'),
-                 pretrain_style='official',
-                 pretrained=None,
-                 init_cfg=None):
+    def __init__(self, pretrain_img_size=224, in_channels=3, embed_dims=96, patch_size=4, window_size=7, mlp_ratio=4, depths=(2, 2, 6, 2), num_heads=(3, 6, 12, 24), strides=(4, 2, 2, 2),
+                 out_indices=(0, 1, 2, 3), qkv_bias=True, qk_scale=None, patch_norm=True, drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1, use_abs_pos_embed=False,
+                 act_cfg=dict(type='GELU'), norm_cfg=dict(type='LN'), pretrain_style='official', pretrained=None, init_cfg=None):
         super(SwinTransformer, self).__init__()
 
         self.list_feats = []
@@ -574,15 +534,12 @@ class SwinTransformer(BaseModule):
         elif isinstance(pretrain_img_size, tuple):
             if len(pretrain_img_size) == 1:
                 pretrain_img_size = to_2tuple(pretrain_img_size[0])
-            assert len(pretrain_img_size) == 2, \
-                f'The size of image should have length 1 or 2, ' \
-                f'but got {len(pretrain_img_size)}'
+            assert len(pretrain_img_size) == 2, f'The size of image should have length 1 or 2, but got {len(pretrain_img_size)}'
 
         assert pretrain_style in ['official', 'mmcls'], 'We only support load official ckpt and mmcls ckpt.'
 
         if isinstance(pretrained, str) or pretrained is None:
-            warnings.warn('DeprecationWarning: pretrained is a deprecated, '
-                          'please use "init_cfg" instead')
+            warnings.warn('DeprecationWarning: pretrained is a deprecated, please use "init_cfg" instead')
         else:
             raise TypeError('pretrained must be a str or None')
 
@@ -595,22 +552,14 @@ class SwinTransformer(BaseModule):
 
         assert strides[0] == patch_size, 'Use non-overlapping patch embed.'
 
-        self.patch_embed = PatchEmbed(
-            in_channels=in_channels,
-            embed_dims=embed_dims,
-            conv_type='Conv2d',
-            kernel_size=patch_size,
-            stride=strides[0],
-            pad_to_patch_size=True,
-            norm_cfg=norm_cfg if patch_norm else None,
-            init_cfg=None)
+        norm_cfg = norm_cfg if patch_norm else None
+        self.patch_embed = PatchEmbed(in_channels=in_channels, embed_dims=embed_dims, conv_type='Conv2d', kernel_size=patch_size, stride=strides[0], pad_to_patch_size=True, norm_cfg=norm_cfg, init_cfg=None)
 
         if self.use_abs_pos_embed:
             patch_row = pretrain_img_size[0] // patch_size
             patch_col = pretrain_img_size[1] // patch_size
             num_patches = patch_row * patch_col
-            self.absolute_pos_embed = nn.Parameter(
-                torch.zeros((1, num_patches, embed_dims)))
+            self.absolute_pos_embed = nn.Parameter(torch.zeros((1, num_patches, embed_dims)))
 
         self.drop_after_pos = nn.Dropout(p=drop_rate)
 
@@ -622,12 +571,7 @@ class SwinTransformer(BaseModule):
         in_channels = embed_dims
         for i in range(num_layers):
             if i < num_layers - 1:
-                downsample = PatchMerging(
-                    in_channels=in_channels,
-                    out_channels=2 * in_channels,
-                    stride=strides[i + 1],
-                    norm_cfg=norm_cfg if patch_norm else None,
-                    init_cfg=None)
+                downsample = PatchMerging(in_channels=in_channels, out_channels=2 * in_channels, stride=strides[i + 1], norm_cfg=norm_cfg, init_cfg=None)
             else:
                 downsample = None
 

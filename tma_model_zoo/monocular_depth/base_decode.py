@@ -150,10 +150,7 @@ class DepthBaseDecodeHead(BaseModule, metaclass=ABCMeta):
     def log_images(self, img_path, depth_pred, depth_gt, img_meta):
         show_img = copy.deepcopy(img_path.detach().cpu().permute(1, 2, 0))
         show_img = show_img.numpy().astype(np.float32)
-        show_img = mmcv.imdenormalize(show_img, 
-                                      img_meta['img_norm_cfg']['mean'],
-                                      img_meta['img_norm_cfg']['std'], 
-                                      img_meta['img_norm_cfg']['to_rgb'])
+        show_img = mmcv.imdenormalize(show_img, img_meta['img_norm_cfg']['mean'], img_meta['img_norm_cfg']['std'], img_meta['img_norm_cfg']['to_rgb'])
         show_img = np.clip(show_img, 0, 255)
         show_img = show_img.astype(np.uint8)
         show_img = show_img[:, :, ::-1]

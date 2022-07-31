@@ -7,19 +7,9 @@ from mmcv.cnn import ConvModule, xavier_init
 from mmcv.cnn.bricks.transformer import build_positional_encoding
 
 from ..monocular_depth.base_decode import DepthBaseDecodeHead
+
 from ..universal.depthformer_utils import resize
 from ..universal.depthformer_basics import HEADS, build_loss, build_transformer
-
-
-class UpSample(nn.Sequential):
-    def __init__(self, skip_input, output_features, conv_cfg=None, norm_cfg=None, act_cfg=None):
-        super(UpSample, self).__init__()
-        self.convA = ConvModule(skip_input, output_features, kernel_size=3, stride=1, padding=1, conv_cfg=conv_cfg, norm_cfg=norm_cfg, act_cfg=act_cfg)
-        self.convB = ConvModule(output_features, output_features, kernel_size=3, stride=1, padding=1, conv_cfg=conv_cfg, norm_cfg=norm_cfg, act_cfg=act_cfg)
-
-    def forward(self, x, concat_with):
-        up_x = F.interpolate(x, size=[concat_with.size(2), concat_with.size(3)], mode='bilinear', align_corners=True)
-        return self.convB(self.convA(torch.cat([up_x, concat_with], dim=1)))
 
 
 @HEADS.register_module()
@@ -30,10 +20,8 @@ class BinsFormerDecodeHead(DepthBaseDecodeHead):
     Args:
         binsformer (bool): Switch from the baseline method to Binsformer module. Default: False.
         align_corners (bool): Whether to apply align_corners mode to achieve upsample. Default: True.
-        norm_cfg (dict|): Config of norm layers.
-            Default: dict(type='BN', requires_grad=True).
-        act_cfg (dict): Config of activation layers.
-            Default: dict(type='LeakyReLU', inplace=True).
+        norm_cfg (dict|): Config of norm layers. Default: dict(type='BN', requires_grad=True).
+        act_cfg (dict): Config of activation layers. Default: dict(type='LeakyReLU', inplace=True).
         dms_decoder (bool): Whether to apply a transfomer encoder before cross-attention with queries. Default: True.
         transformer_encoder (dict|None): General transfomer encoder config before cross-attention with queries. 
         positional_encoding (dict|None): Position encoding (p.e.) config.
@@ -46,28 +34,11 @@ class BinsFormerDecodeHead(DepthBaseDecodeHead):
         classify (bool): Whether to apply scene understanding aux task. Default: True.
         class_num (int): class number for scene understanding aux task. Default: 25
         loss_class (dict): Config of scene classification loss. Default: dict(type='CrossEntropyLoss', loss_weight=1e-1).
-        train_cfg (dict): Config of aux loss following most detr-like methods.
-            Default: dict(aux_loss=True,),
+        train_cfg (dict): Config of aux loss following most detr-like methods. Default: dict(aux_loss=True,),
     """
-    def __init__(self,
-                 binsformer=True,
-                 align_corners=True,
-                 norm_cfg=dict(type='BN', requires_grad=True),
-                 act_cfg=dict(type='LeakyReLU', inplace=True),
-                 dms_decoder=True,
-                 transformer_encoder=None,
-                 positional_encoding=None,
-                 conv_dim=256,
-                 index=[0,1,2,3,4],
-                 trans_index=[1,2,3],
-                 transformer_decoder=None,
-                 with_loss_chamfer=False,
-                 loss_chamfer=None,
-                 classify=True,
-                 class_num=25,
-                 loss_class=dict(type='CrossEntropyLoss', loss_weight=1e-1),
-                 train_cfg=dict(aux_loss=True,),
-                 **kwargs):
+    def __init__(self, binsformer=True, align_corners=True, norm_cfg=dict(type='BN', requires_grad=True), act_cfg=dict(type='LeakyReLU', inplace=True), dms_decoder=True,
+                 transformer_encoder=None, positional_encoding=None, conv_dim=256, index=[0,1,2,3,4], trans_index=[1,2,3], transformer_decoder=None,
+                 with_loss_chamfer=False, loss_chamfer=None, classify=True, class_num=25, loss_class=dict(type='CrossEntropyLoss', loss_weight=1e-1), train_cfg=dict(aux_loss=True,), **kwargs):
         super(BinsFormerDecodeHead, self).__init__(**kwargs)
 
         self.conv_dim = conv_dim
@@ -81,6 +52,8 @@ class BinsFormerDecodeHead(DepthBaseDecodeHead):
         self.trans_index = trans_index
         self.level_embed = nn.Embedding(self.transformer_num_feature_levels, conv_dim)
         self.with_loss_chamfer = with_loss_chamfer
+
+        self.level2full = 2
 
         if with_loss_chamfer:
             self.loss_chamfer = build_loss(loss_chamfer)
@@ -114,18 +87,17 @@ class BinsFormerDecodeHead(DepthBaseDecodeHead):
         self.classify = classify
         if self.classify is True:
             self.loss_class = build_loss(loss_class)
-            # transformer_decoder['decoder']['classify'] = True
-            # transformer_decoder['decoder']['class_num'] = class_num
             transformer_decoder['classify'] = True
             transformer_decoder['class_num'] = class_num
-            # Add an additional query for classifing.
+            #  Add an additional query for classifing.
             self.query_feat = nn.Embedding(self.n_bins + 1, conv_dim)
             self.query_embed = nn.Embedding(self.n_bins + 1, conv_dim)
         else:
-            # transformer_decoder['decoder']['classify'] = False
             transformer_decoder['classify'] = False
+
             # learnable query features
             self.query_feat = nn.Embedding(self.n_bins, conv_dim)
+
             # learnable query p.e.
             self.query_embed = nn.Embedding(self.n_bins, conv_dim)
 
@@ -162,16 +134,11 @@ class BinsFormerDecodeHead(DepthBaseDecodeHead):
             
             # projection of the input features
             trans_feats = [inputs[i] for i in self.trans_index]
-
-            mlvl_feats = [
-                skip_proj(trans_feats[i])
-                for i, skip_proj in enumerate(self.skip_proj)
-            ]
+            mlvl_feats = [skip_proj(trans_feats[i]) for i, skip_proj in enumerate(self.skip_proj)]
 
             batch_size = mlvl_feats[0].size(0)
             input_img_h, input_img_w = mlvl_feats[0].size(2), mlvl_feats[0].size(3)
-            img_masks = mlvl_feats[0].new_zeros(
-                (batch_size, input_img_h, input_img_w))
+            img_masks = mlvl_feats[0].new_zeros((batch_size, input_img_h, input_img_w))
 
             mlvl_masks = []
             mlvl_positional_encodings = []
@@ -189,18 +156,17 @@ class BinsFormerDecodeHead(DepthBaseDecodeHead):
 
             y = torch.split(feats, split_size_or_sections, dim=1)
 
-            for i, z in enumerate(y):
-                out.append(z.transpose(1, 2).view(bs, -1, mlvl_feats[i].size(2), mlvl_feats[i].size(3)))
+            out.extend(z.transpose(1, 2).view(bs, -1, mlvl_feats[i].size(2), mlvl_feats[i].size(3)) for i, z in enumerate(y))
 
             out = out[::-1]
 
         # NOTE: pixel-wise decoder to obtain the hr feature map
         multi_scale_features = []
         num_cur_levels = 0
+        
         # append `out` with extra FPN levels (following MaskFormer, Mask2Former)
         # Reverse feature maps into top-down order (from low to high resolution)
         for idx, f in enumerate(self.index[:self.num_fpn_levels][::-1]):
-
             x = inputs[f]
             lateral_conv = self.lateral_convs[idx]
             output_conv = self.output_convs[idx]
@@ -210,19 +176,12 @@ class BinsFormerDecodeHead(DepthBaseDecodeHead):
             y = output_conv(y)
 
             out.append(y)
-        
-        # the features in list out:
-        # binsformer out = [1/32 enh feat, 1/16 enh feat, 1/8 enh feat, ... 
-        #                   **DMSTransformer output(or naive inputs), low res to high res.**
-        #                   **totally have self.transformer_num_feature_levels feats witch will interact with the bins queries**
-        #                   temp feat, temp feat, temp feat, ..., per-pixel final-feat]
 
         for o in out:
             if num_cur_levels < self.transformer_num_feature_levels:
                 multi_scale_features.append(o)
                 num_cur_levels += 1
 
-        
         # NOTE: transformer decoder
         per_pixel_feat = out[-1]
         pred_bins = []
@@ -238,8 +197,7 @@ class BinsFormerDecodeHead(DepthBaseDecodeHead):
 
         batch_size = mlvl_feats[0].size(0)
         input_img_h, input_img_w = mlvl_feats[0].size(2), mlvl_feats[0].size(3)
-        img_masks = mlvl_feats[0].new_zeros(
-            (batch_size, input_img_h, input_img_w))
+        img_masks = mlvl_feats[0].new_zeros((batch_size, input_img_h, input_img_w))
 
         mlvl_masks = []
         for idx, feat in enumerate(mlvl_feats):
@@ -251,15 +209,14 @@ class BinsFormerDecodeHead(DepthBaseDecodeHead):
             # 4, 256, 14144 -> HW, N, C
             pos[-1] = pos[-1].permute(2, 0, 1)
             src[-1] = src[-1].permute(2, 0, 1)
-        
+
         multi_scale_infos = {'src':src, 'pos':pos, 'size_list':size_list}
 
         bs = per_pixel_feat.shape[0]
         query_feat = self.query_feat.weight.unsqueeze(1).repeat(1, bs, 1)
         query_pe = self.query_embed.weight.unsqueeze(1).repeat(1, bs, 1)
 
-        predictions_bins, predictions_logits, predictions_class = \
-             self.transformer_decoder(multi_scale_infos, query_feat, query_pe, per_pixel_feat)
+        predictions_bins, predictions_logits, predictions_class = self.transformer_decoder(multi_scale_infos, query_feat, query_pe, per_pixel_feat)
 
         # NOTE: depth estimation module
         self.norm = 'softmax'
@@ -269,7 +226,7 @@ class BinsFormerDecodeHead(DepthBaseDecodeHead):
                 pred_depth = F.relu(self.pred_depth(pred_logit)) + self.min_depth
             else:
                 bins = item_bin.squeeze(dim=2)
-                
+
                 if self.norm == 'linear':
                     bins = torch.relu(bins)
                     eps = 0.1
@@ -292,7 +249,7 @@ class BinsFormerDecodeHead(DepthBaseDecodeHead):
 
                 centers = self.hook_identify_center(centers)
                 pred_logit = self.hook_identify_prob(pred_logit)
-            
+
                 pred_bins.append(bin_edges)
                 pred_classes.append(pred_class) 
 
@@ -302,21 +259,14 @@ class BinsFormerDecodeHead(DepthBaseDecodeHead):
 
     def forward_train(self, img, inputs, img_metas, depth_gt, train_cfg, class_label=None):
         losses = {}
-
         pred_depths, pred_bins, pred_classes = self.forward(inputs)
 
         aux_weight_dict = {}
-
         if train_cfg["aux_loss"]:
             for index, weight in zip(train_cfg["aux_index"], train_cfg["aux_weight"]):
                 depth = pred_depths[index]
 
-                depth = resize(
-                    input=depth,
-                    size=depth_gt.shape[2:],
-                    mode='bilinear',
-                    align_corners=self.align_corners,
-                    warning=False)
+                depth = resize(input=depth, size=depth_gt.shape[-2:], mode='bilinear', align_corners=self.align_corners, warning=False)
 
                 if self.binsformer is False:
                     depth_loss = self.loss_decode(depth, depth_gt) * weight
@@ -340,13 +290,7 @@ class BinsFormerDecodeHead(DepthBaseDecodeHead):
 
         # main loss
         depth = pred_depths[-1]
-
-        depth = resize(
-            input=depth,
-            size=depth_gt.shape[2:],
-            mode='bilinear',
-            align_corners=self.align_corners,
-            warning=False)
+        depth = resize(input=depth, size=depth_gt.shape[-2:], mode='bilinear', align_corners=self.align_corners, warning=False)
 
         if self.binsformer is False:
             depth_loss = self.loss_decode(depth, depth_gt)

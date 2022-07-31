@@ -142,9 +142,7 @@ class SinePositionalEncoding(BaseModule):
                  init_cfg=None):
         super(SinePositionalEncoding, self).__init__(init_cfg)
         if normalize:
-            assert isinstance(scale, (float, int)), 'when normalize is set,' \
-                'scale should be provided and in float or int type, ' \
-                f'found {type(scale)}'
+            assert isinstance(scale, (float, int)), f'when normalize is set, scale should be provided and in float or int type, found {type(scale)}'
         self.num_feats = num_feats
         self.temperature = temperature
         self.normalize = normalize
@@ -155,37 +153,27 @@ class SinePositionalEncoding(BaseModule):
     def forward(self, mask):
         """Forward function for `SinePositionalEncoding`.
         Args:
-            mask (Tensor): ByteTensor mask. Non-zero values representing
-                ignored positions, while zero values means valid positions
-                for this image. Shape [bs, h, w].
+            mask (Tensor): ByteTensor mask. Non-zero values representing ignored positions, while zero values means valid positions for this image. Shape [bs, h, w].
         Returns:
-            pos (Tensor): Returned position embedding with shape
-                [bs, num_feats*2, h, w].
+            pos (Tensor): Returned position embedding with shape [bs, num_feats*2, h, w].
         """
-        # For convenience of exporting to ONNX, it's required to convert
-        # `masks` from bool to int.
+        # For convenience of exporting to ONNX, it's required to convert `masks` from bool to int.
         mask = mask.to(torch.int)
         not_mask = 1 - mask  # logical_not
         y_embed = not_mask.cumsum(1, dtype=torch.float32)
         x_embed = not_mask.cumsum(2, dtype=torch.float32)
         if self.normalize:
-            y_embed = (y_embed + self.offset) / \
-                      (y_embed[:, -1:, :] + self.eps) * self.scale
-            x_embed = (x_embed + self.offset) / \
-                      (x_embed[:, :, -1:] + self.eps) * self.scale
-        dim_t = torch.arange(
-            self.num_feats, dtype=torch.float32, device=mask.device)
+            y_embed = (y_embed + self.offset) / (y_embed[:, -1:, :] + self.eps) * self.scale
+            x_embed = (x_embed + self.offset) / (x_embed[:, :, -1:] + self.eps) * self.scale
+        dim_t = torch.arange(self.num_feats, dtype=torch.float32, device=mask.device)
         dim_t = self.temperature**(2 * (dim_t // 2) / self.num_feats)
         pos_x = x_embed[:, :, :, None] / dim_t
         pos_y = y_embed[:, :, :, None] / dim_t
+        
         # use `view` instead of `flatten` for dynamically exporting to ONNX
         B, H, W = mask.size()
-        pos_x = torch.stack(
-            (pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()),
-            dim=4).view(B, H, W, -1)
-        pos_y = torch.stack(
-            (pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()),
-            dim=4).view(B, H, W, -1)
+        pos_x = torch.stack((pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4).view(B, H, W, -1)
+        pos_y = torch.stack((pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4).view(B, H, W, -1)
         return torch.cat((pos_y, pos_x), dim=3).permute(0, 3, 1, 2)
 
     def __repr__(self):
@@ -214,19 +202,7 @@ class ResLayer(nn.Sequential):
         contract_dilation (bool): Whether contract first dilation of each layer. Default: False
     """
 
-    def __init__(self,
-                 block,
-                 inplanes,
-                 planes,
-                 num_blocks,
-                 stride=1,
-                 dilation=1,
-                 avg_down=False,
-                 conv_cfg=None,
-                 norm_cfg=dict(type='BN'),
-                 multi_grid=None,
-                 contract_dilation=False,
-                 **kwargs):
+    def __init__(self, block, inplanes, planes, num_blocks, stride=1, dilation=1, avg_down=False, conv_cfg=None, norm_cfg=dict(type='BN'), multi_grid=None, contract_dilation=False, **kwargs):
         self.block = block
 
         downsample = None
@@ -321,36 +297,13 @@ class UpConvBlock(nn.Module):
         assert dcn is None, 'Not implemented yet.'
         assert plugins is None, 'Not implemented yet.'
 
-        self.conv_block = conv_block(
-            in_channels=2 * skip_channels,
-            out_channels=out_channels,
-            num_convs=num_convs,
-            stride=stride,
-            dilation=dilation,
-            with_cp=with_cp,
-            conv_cfg=conv_cfg,
-            norm_cfg=norm_cfg,
-            act_cfg=act_cfg,
-            dcn=None,
-            plugins=None)
+        self.conv_block = conv_block(in_channels=2 * skip_channels, out_channels=out_channels, num_convs=num_convs, stride=stride, dilation=dilation, with_cp=with_cp, conv_cfg=conv_cfg,
+            norm_cfg=norm_cfg, act_cfg=act_cfg, dcn=None, plugins=None)
+        
         if upsample_cfg is not None:
-            self.upsample = build_upsample_layer(
-                cfg=upsample_cfg,
-                in_channels=in_channels,
-                out_channels=skip_channels,
-                with_cp=with_cp,
-                norm_cfg=norm_cfg,
-                act_cfg=act_cfg)
+            self.upsample = build_upsample_layer(cfg=upsample_cfg, in_channels=in_channels, out_channels=skip_channels, with_cp=with_cp, norm_cfg=norm_cfg, act_cfg=act_cfg)
         else:
-            self.upsample = ConvModule(
-                in_channels,
-                skip_channels,
-                kernel_size=1,
-                stride=1,
-                padding=0,
-                conv_cfg=conv_cfg,
-                norm_cfg=norm_cfg,
-                act_cfg=act_cfg)
+            self.upsample = ConvModule(in_channels, skip_channels, kernel_size=1, stride=1, padding=0, conv_cfg=conv_cfg, norm_cfg=norm_cfg, act_cfg=act_cfg)
 
     def forward(self, skip, x):
         """Forward function."""
@@ -367,19 +320,7 @@ class BasicBlock(BaseModule):
 
     expansion = 1
 
-    def __init__(self,
-                 inplanes,
-                 planes,
-                 stride=1,
-                 dilation=1,
-                 downsample=None,
-                 style='pytorch',
-                 with_cp=False,
-                 conv_cfg=None,
-                 norm_cfg=dict(type='BN'),
-                 dcn=None,
-                 plugins=None,
-                 init_cfg=None):
+    def __init__(self, inplanes, planes, stride=1, dilation=1, downsample=None, style='pytorch', with_cp=False, conv_cfg=None, norm_cfg=dict(type='BN'), dcn=None, plugins=None, init_cfg=None):
         super(BasicBlock, self).__init__(init_cfg)
         assert dcn is None, 'Not implemented yet.'
         assert plugins is None, 'Not implemented yet.'
@@ -387,18 +328,9 @@ class BasicBlock(BaseModule):
         self.norm1_name, norm1 = build_norm_layer(norm_cfg, planes, postfix=1)
         self.norm2_name, norm2 = build_norm_layer(norm_cfg, planes, postfix=2)
 
-        self.conv1 = build_conv_layer(
-            conv_cfg,
-            inplanes,
-            planes,
-            3,
-            stride=stride,
-            padding=dilation,
-            dilation=dilation,
-            bias=False)
+        self.conv1 = build_conv_layer(conv_cfg, inplanes, planes, 3, stride=stride, padding=dilation, dilation=dilation, bias=False)
         self.add_module(self.norm1_name, norm1)
-        self.conv2 = build_conv_layer(
-            conv_cfg, planes, planes, 3, padding=1, bias=False)
+        self.conv2 = build_conv_layer(conv_cfg, planes, planes, 3, padding=1, bias=False)
         self.add_module(self.norm2_name, norm2)
 
         self.relu = nn.ReLU(inplace=True)
@@ -449,25 +381,12 @@ class BasicBlock(BaseModule):
 
 class Bottleneck(BaseModule):
     """Bottleneck block for ResNet.
-    If style is "pytorch", the stride-two layer is the 3x3 conv layer, if it is
-    "caffe", the stride-two layer is the first 1x1 conv layer.
+    If style is "pytorch", the stride-two layer is the 3x3 conv layer, if it is "caffe", the stride-two layer is the first 1x1 conv layer.
     """
 
     expansion = 4
 
-    def __init__(self,
-                 inplanes,
-                 planes,
-                 stride=1,
-                 dilation=1,
-                 downsample=None,
-                 style='pytorch',
-                 with_cp=False,
-                 conv_cfg=None,
-                 norm_cfg=dict(type='BN'),
-                 dcn=None,
-                 plugins=None,
-                 init_cfg=None):
+    def __init__(self, inplanes, planes, stride=1, dilation=1, downsample=None, style='pytorch', with_cp=False, conv_cfg=None, norm_cfg=dict(type='BN'), dcn=None, plugins=None, init_cfg=None):
         super(Bottleneck, self).__init__(init_cfg)
         assert style in ['pytorch', 'caffe']
         assert dcn is None or isinstance(dcn, dict)
@@ -491,18 +410,9 @@ class Bottleneck(BaseModule):
 
         if self.with_plugins:
             # collect plugins for conv1/conv2/conv3
-            self.after_conv1_plugins = [
-                plugin['cfg'] for plugin in plugins
-                if plugin['position'] == 'after_conv1'
-            ]
-            self.after_conv2_plugins = [
-                plugin['cfg'] for plugin in plugins
-                if plugin['position'] == 'after_conv2'
-            ]
-            self.after_conv3_plugins = [
-                plugin['cfg'] for plugin in plugins
-                if plugin['position'] == 'after_conv3'
-            ]
+            self.after_conv1_plugins = [plugin['cfg'] for plugin in plugins if plugin['position'] == 'after_conv1']
+            self.after_conv2_plugins = [plugin['cfg'] for plugin in plugins if plugin['position'] == 'after_conv2']
+            self.after_conv3_plugins = [plugin['cfg'] for plugin in plugins if plugin['position'] == 'after_conv3']
 
         if self.style == 'pytorch':
             self.conv1_stride = 1
@@ -513,16 +423,9 @@ class Bottleneck(BaseModule):
 
         self.norm1_name, norm1 = build_norm_layer(norm_cfg, planes, postfix=1)
         self.norm2_name, norm2 = build_norm_layer(norm_cfg, planes, postfix=2)
-        self.norm3_name, norm3 = build_norm_layer(
-            norm_cfg, planes * self.expansion, postfix=3)
+        self.norm3_name, norm3 = build_norm_layer(norm_cfg, planes * self.expansion, postfix=3)
 
-        self.conv1 = build_conv_layer(
-            conv_cfg,
-            inplanes,
-            planes,
-            kernel_size=1,
-            stride=self.conv1_stride,
-            bias=False)
+        self.conv1 = build_conv_layer(conv_cfg, inplanes, planes, kernel_size=1, stride=self.conv1_stride, bias=False)
         self.add_module(self.norm1_name, norm1)
         fallback_on_stride = False
         if self.with_dcn:
@@ -642,9 +545,7 @@ class PureMSDEnTransformer(BaseModule):
 
     def init_layers(self):
         """Initialize layers of the DeformableDetrTransformer."""
-        self.level_embeds = nn.Parameter(
-            torch.Tensor(self.num_feature_levels, self.embed_dims))
-
+        self.level_embeds = nn.Parameter(torch.Tensor(self.num_feature_levels, self.embed_dims))
         self.reference_points = nn.Linear(self.embed_dims, 2)
 
     def init_weights(self):
@@ -698,44 +599,33 @@ class PureMSDEnTransformer(BaseModule):
     def get_proposal_pos_embed(self, proposals, num_pos_feats=128, temperature=10000):
         """Get the position embedding of proposal."""
         scale = 2 * math.pi
-        dim_t = torch.arange(
-            num_pos_feats, dtype=torch.float32, device=proposals.device)
+        dim_t = torch.arange(num_pos_feats, dtype=torch.float32, device=proposals.device)
         dim_t = temperature**(2 * (dim_t // 2) / num_pos_feats)
+        
         # N, L, 4
         proposals = proposals.sigmoid() * scale
+        
         # N, L, 4, 128
         pos = proposals[:, :, :, None] / dim_t
+        
         # N, L, 4, 64, 2
-        pos = torch.stack((pos[:, :, :, 0::2].sin(), pos[:, :, :, 1::2].cos()),
-                          dim=4).flatten(2)
+        pos = torch.stack((pos[:, :, :, 0::2].sin(), pos[:, :, :, 1::2].cos()), dim=4).flatten(2)
         return pos
 
-    def forward(self,
-                mlvl_feats,
-                mlvl_masks,
-                mlvl_pos_embeds,
-                **kwargs):
+    def forward(self, mlvl_feats, mlvl_masks, mlvl_pos_embeds, **kwargs):
         """Forward function for `Transformer`.
         Args:
-            mlvl_feats (list(Tensor)): Input queries from
-                different level. Each element has shape
-                [bs, embed_dims, h, w].
-            mlvl_masks (list(Tensor)): The key_padding_mask from
-                different level used for encoder and decoder,
-                each element has shape  [bs, h, w].
-            mlvl_pos_embeds (list(Tensor)): The positional encoding
-                of feats from different level, has the shape
-                 [bs, embed_dims, h, w].
+            mlvl_feats (list(Tensor)): Input queries from different level. Each element has shape [bs, embed_dims, h, w].
+            mlvl_masks (list(Tensor)): The key_padding_mask from different level used for encoder and decoder, each element has shape  [bs, h, w].
+            mlvl_pos_embeds (list(Tensor)): The positional encoding of feats from different level, has the shape [bs, embed_dims, h, w].
         Returns:
-            tuple[Tensor]: results of decoder containing the following tensor.
-                - memory: Encoder results.
+            tuple[Tensor]: results of decoder containing the following tensor - memory: Encoder results.
         """
         feat_flatten = []
         mask_flatten = []
         lvl_pos_embed_flatten = []
         spatial_shapes = []
-        for lvl, (feat, mask, pos_embed) in enumerate(
-                zip(mlvl_feats, mlvl_masks, mlvl_pos_embeds)):
+        for lvl, (feat, mask, pos_embed) in enumerate(zip(mlvl_feats, mlvl_masks, mlvl_pos_embeds)):
             bs, c, h, w = feat.shape
             spatial_shape = (h, w)
             spatial_shapes.append(spatial_shape)
@@ -749,32 +639,16 @@ class PureMSDEnTransformer(BaseModule):
         feat_flatten = torch.cat(feat_flatten, 1)
         mask_flatten = torch.cat(mask_flatten, 1)
         lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1)
-        spatial_shapes = torch.as_tensor(
-            spatial_shapes, dtype=torch.long, device=feat_flatten.device)
-        level_start_index = torch.cat((spatial_shapes.new_zeros(
-            (1, )), spatial_shapes.prod(1).cumsum(0)[:-1]))
-        valid_ratios = torch.stack(
-            [self.get_valid_ratio(m) for m in mlvl_masks], 1)
+        spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=feat_flatten.device)
+        level_start_index = torch.cat((spatial_shapes.new_zeros((1,)), spatial_shapes.prod(1).cumsum(0)[:-1]))
+        valid_ratios = torch.stack([self.get_valid_ratio(m) for m in mlvl_masks], 1)
 
-        reference_points = \
-            self.get_reference_points(spatial_shapes,
-                                      valid_ratios,
-                                      device=feat.device)
+        reference_points = self.get_reference_points(spatial_shapes, valid_ratios, device=feat.device)
 
-        feat_flatten = feat_flatten.permute(1, 0, 2)  # (H*W, bs, embed_dims)
-        lvl_pos_embed_flatten = lvl_pos_embed_flatten.permute(
-            1, 0, 2)  # (H*W, bs, embed_dims)
-        memory = self.encoder(
-            query=feat_flatten,
-            key=None,
-            value=None,
-            query_pos=lvl_pos_embed_flatten,
-            query_key_padding_mask=mask_flatten,
-            spatial_shapes=spatial_shapes,
-            reference_points=reference_points,
-            level_start_index=level_start_index,
-            valid_ratios=valid_ratios,
-            **kwargs)
+        feat_flatten = feat_flatten.permute(1, 0, 2)                     # (H*W, bs, embed_dims)
+        lvl_pos_embed_flatten = lvl_pos_embed_flatten.permute(1, 0, 2)   # (H*W, bs, embed_dims)
+        memory = self.encoder(query=feat_flatten, key=None, value=None, query_pos=lvl_pos_embed_flatten, query_key_padding_mask=mask_flatten, spatial_shapes=spatial_shapes,
+            reference_points=reference_points, level_start_index=level_start_index, valid_ratios=valid_ratios, **kwargs)
 
         memory = memory.permute(1, 0, 2)
 
@@ -811,12 +685,9 @@ class DetrTransformerEncoder(TransformerLayerSequence):
 class PixelTransformerDecoderLayer(BaseModule):
     """Base `TransformerLayer` for vision transformer.
 
-    It can be built from `mmcv.ConfigDict` and support more flexible
-    customization, for example, using any number of `FFN or LN ` and
-    use different kinds of `attention` by specifying a list of `ConfigDict`
-    named `attn_cfgs`. It is worth mentioning that it supports `prenorm`
-    when you specifying `norm` as the first element of `operation_order`.
-    More details about the `prenorm`: `On Layer Normalization in the
+    It can be built from `mmcv.ConfigDict` and support more flexible customization, for example, using any number of `FFN or LN ` and
+    use different kinds of `attention` by specifying a list of `ConfigDict` named `attn_cfgs`. It is worth mentioning that it supports `prenorm`
+    when you specifying `norm` as the first element of `operation_order`. More details about the `prenorm`: `On Layer Normalization in the
     Transformer Architecture <https://arxiv.org/abs/2002.04745>`_ .
 
     Args:
@@ -830,33 +701,14 @@ class PixelTransformerDecoderLayer(BaseModule):
         init_cfg (obj:`mmcv.ConfigDict`): The Config for initialization. Default: None.
         batch_first (bool): Key, Query and Value are shape of (batch, n, embed_dim) or (n, batch, embed_dim). Default to False.
     """
-    def __init__(self,
-                 attn_cfgs=None,
-                 ffn_cfgs=dict(
-                     type='FFN',
-                     embed_dims=256,
-                     feedforward_channels=1024,
-                     num_fcs=2,
-                     ffn_drop=0.,
-                     act_cfg=dict(type='ReLU', inplace=True),
-                 ),
-                 operation_order=None,
-                 norm_cfg=dict(type='LN'),
-                 init_cfg=None,
-                 batch_first=False,
-                 **kwargs):
+    def __init__(self, attn_cfgs=None, ffn_cfgs=dict(type='FFN', embed_dims=256, feedforward_channels=1024, num_fcs=2, ffn_drop=0., act_cfg=dict(type='ReLU', inplace=True)),
+                 operation_order=None, norm_cfg=dict(type='LN'), init_cfg=None, batch_first=False, **kwargs):
 
-        deprecated_args = dict(feedforward_channels='feedforward_channels',
-                               ffn_dropout='ffn_drop',
-                               ffn_num_fcs='num_fcs')
+        deprecated_args = dict(feedforward_channels='feedforward_channels', ffn_dropout='ffn_drop', ffn_num_fcs='num_fcs')
 
         for ori_name, new_name in deprecated_args.items():
             if ori_name in kwargs:
-                warnings.warn(
-                    f'The arguments `{ori_name}` in BaseTransformerLayer '
-                    f'has been deprecated, now you should set `{new_name}` '
-                    f'and other FFN related arguments '
-                    f'to a dict named `ffn_cfgs`. ')
+                warnings.warn(f'The arguments `{ori_name}` in BaseTransformerLayer has been deprecated, now you should set `{new_name}` and other FFN related arguments to a dict named `ffn_cfgs`.')
                 ffn_cfgs[new_name] = kwargs[ori_name]
 
         super(PixelTransformerDecoderLayer, self).__init__(init_cfg)
@@ -886,8 +738,8 @@ class PixelTransformerDecoderLayer(BaseModule):
                 else:
                     attn_cfgs[index]['batch_first'] = self.batch_first
                 attention = build_attention(attn_cfgs[index])
-                # Some custom attentions used as `self_attn`
-                # or `cross_attn` can have different behavior.
+
+                # Some custom attentions used as `self_attn` or `cross_attn` can have different behavior.
                 attention.operation_name = operation_name
                 self.attentions.append(attention)
                 index += 1
@@ -906,52 +758,26 @@ class PixelTransformerDecoderLayer(BaseModule):
                 ffn_cfgs[ffn_index]['embed_dims'] = self.embed_dims
             else:
                 assert ffn_cfgs[ffn_index]['embed_dims'] == self.embed_dims
-            self.ffns.append(
-                build_feedforward_network(ffn_cfgs[ffn_index],
-                                          dict(type='FFN')))
+            self.ffns.append(build_feedforward_network(ffn_cfgs[ffn_index], dict(type='FFN')))
 
         self.norms = ModuleList()
         num_norms = operation_order.count('norm')
         for _ in range(num_norms):
             self.norms.append(build_norm_layer(norm_cfg, self.embed_dims)[1])
 
-    def forward(self,
-                query,
-                key=None,
-                value=None,
-                query_pos=None,
-                key_pos=None,
-                attn_masks=None,
-                query_key_padding_mask=None,
-                key_padding_mask=None,
-                num_heads=8,
-                **kwargs):
+    def forward(self, query, key=None, value=None, query_pos=None, key_pos=None, attn_masks=None, query_key_padding_mask=None, key_padding_mask=None, num_heads=8, **kwargs):
         """Forward function for `TransformerDecoderLayer`.
-
         **kwargs contains some specific arguments of attentions.
 
         Args:
-            query (Tensor): The input query with shape
-                [num_queries, bs, embed_dims] if
-                self.batch_first is False, else
-                [bs, num_queries embed_dims].
-            key (Tensor): The key tensor with shape [num_keys, bs,
-                embed_dims] if self.batch_first is False, else
-                [bs, num_keys, embed_dims] .
+            query (Tensor): The input query with shape [num_queries, bs, embed_dims] if self.batch_first is False, else [bs, num_queries embed_dims].
+            key (Tensor): The key tensor with shape [num_keys, bs, embed_dims] if self.batch_first is False, else [bs, num_keys, embed_dims].
             value (Tensor): The value tensor with same shape as `key`.
-            query_pos (Tensor): The positional encoding for `query`.
-                Default: None.
-            key_pos (Tensor): The positional encoding for `key`.
-                Default: None.
-            attn_masks (List[Tensor] | None): 2D Tensor used in
-                calculation of corresponding attention. The length of
-                it should equal to the number of `attention` in
-                `operation_order`. Default: None.
-            query_key_padding_mask (Tensor): ByteTensor for `query`, with
-                shape [bs, num_queries]. Only used in `self_attn` layer.
-                Defaults to None.
-            key_padding_mask (Tensor): ByteTensor for `query`, with
-                shape [bs, num_keys]. Default: None.
+            query_pos (Tensor): The positional encoding for `query`. Default: None.
+            key_pos (Tensor): The positional encoding for `key`. Default: None.
+            attn_masks (List[Tensor] | None): 2D Tensor used in calculation of corresponding attention. The length of it should equal to the number of `attention` in `operation_order`. Default: None.
+            query_key_padding_mask (Tensor): ByteTensor for `query`, with shape [bs, num_queries]. Only used in `self_attn` layer. Defaults to None.
+            key_padding_mask (Tensor): ByteTensor for `query`, with shape [bs, num_keys]. Default: None.
 
         Returns:
             Tensor: forwarded results with shape [num_queries, bs, embed_dims].
@@ -965,30 +791,15 @@ class PixelTransformerDecoderLayer(BaseModule):
         if attn_masks is None:
             attn_masks = [None for _ in range(self.num_attn)]
         elif isinstance(attn_masks, torch.Tensor):
-            attn_masks = [
-                copy.deepcopy(attn_masks) for _ in range(self.num_attn)
-            ]
-            warnings.warn(f'Use same attn_mask in all attentions in '
-                          f'{self.__class__.__name__} ')
+            attn_masks = [copy.deepcopy(attn_masks) for _ in range(self.num_attn)]
+            warnings.warn(f'Use same attn_mask in all attentions in {self.__class__.__name__}')
         else:
-            assert len(attn_masks) == self.num_attn, f'The length of ' \
-                        f'attn_masks {len(attn_masks)} must be equal ' \
-                        f'to the number of attention in ' \
-                        f'operation_order {self.num_attn}'
+            assert len(attn_masks) == self.num_attn, f'The length of attn_masks {len(attn_masks)} must be equal to the number of attention in operation_order {self.num_attn}'
 
         for layer in self.operation_order:
             if layer == 'self_attn':
                 temp_key = temp_value = query
-                query = self.attentions[attn_index](
-                    query,
-                    temp_key,
-                    temp_value,
-                    identity if self.pre_norm else None,
-                    query_pos=query_pos,
-                    key_pos=query_pos,
-                    # attn_mask=attn_masks[attn_index], # No att mask
-                    key_padding_mask=query_key_padding_mask,
-                    **kwargs)
+                query = self.attentions[attn_index](query, temp_key, temp_value, identity if self.pre_norm else None, query_pos=query_pos, key_pos=query_pos, key_padding_mask=query_key_padding_mask, **kwargs)
                 attn_index += 1
                 identity = query
 
@@ -997,22 +808,12 @@ class PixelTransformerDecoderLayer(BaseModule):
                 norm_index += 1
 
             elif layer == 'cross_attn':
-                query = self.attentions[attn_index](
-                    query,
-                    key,
-                    value,
-                    identity if self.pre_norm else None,
-                    query_pos=query_pos,
-                    key_pos=key_pos,
-                    attn_mask=attn_masks[attn_index],
-                    key_padding_mask=key_padding_mask,
-                    **kwargs)
+                query = self.attentions[attn_index](query, key, value, identity if self.pre_norm else None, query_pos=query_pos, key_pos=key_pos, attn_mask=attn_masks[attn_index], key_padding_mask=key_padding_mask, **kwargs)
                 attn_index += 1
                 identity = query
 
             elif layer == 'ffn':
-                query = self.ffns[ffn_index](
-                    query, identity if self.pre_norm else None)
+                query = self.ffns[ffn_index](query, identity if self.pre_norm else None)
                 ffn_index += 1
 
         return query
@@ -1026,27 +827,15 @@ class PixelTransformerDecoder(BaseModule):
         post_norm_cfg (dict): Config of last normalization layer. Default： `LN`.
     """
 
-    def __init__(self,
-                 hidden_dim,
-                 post_norm_cfg=dict(type='LN'),
-                 return_intermediate=False,
-                 transformerlayers=None,
-                 num_layers=9,
-                 num_feature_levels=3,
-                 init_cfg=None,
-                 classify=True,
-                 class_num=249,
-                 operation='%'):
+    def __init__(self, hidden_dim, post_norm_cfg=dict(type='LN'), return_intermediate=False, transformerlayers=None, num_layers=9, num_feature_levels=3, init_cfg=None,
+                 classify=True, class_num=249, operation='%'):
 
         super(PixelTransformerDecoder, self).__init__(init_cfg)
         if num_layers!=0:
             if isinstance(transformerlayers, dict):
-                transformerlayers = [
-                    copy.deepcopy(transformerlayers) for _ in range(num_layers)
-                ]
+                transformerlayers = [copy.deepcopy(transformerlayers) for _ in range(num_layers)]
             else:
-                assert isinstance(transformerlayers, list) and \
-                    len(transformerlayers) == num_layers
+                assert isinstance(transformerlayers, list) and len(transformerlayers) == num_layers
             self.num_layers = num_layers
             self.layers = ModuleList()
             for i in range(num_layers):
@@ -1056,8 +845,7 @@ class PixelTransformerDecoder(BaseModule):
             self.pre_norm = self.layers[0].pre_norm
 
             if post_norm_cfg is not None:
-                self.post_norm = build_norm_layer(post_norm_cfg,
-                                                self.embed_dims)[1]
+                self.post_norm = build_norm_layer(post_norm_cfg, self.embed_dims)[1]
             else:
                 self.post_norm = None
         else:
@@ -1083,8 +871,7 @@ class PixelTransformerDecoder(BaseModule):
         self.hook_identify = torch.nn.Identity()
 
         self.operation = operation
-        assert operation in ['%', '//'], \
-            "only support '%' or '//'. No obvious discrepancy between them."
+        assert operation in ['%', '//'], "only support '%' or '//'. No obvious discrepancy between them."
 
     def forward_prediction_heads(self, output, mask_features):
         decoder_output = self.decoder_norm(output)
@@ -1106,26 +893,17 @@ class PixelTransformerDecoder(BaseModule):
 
         return outputs_bins, outputs_mask, outputs_class
 
-    def forward(self,
-                ms_feats,
-                query_embed,
-                query_feat,
-                mask_features,
-                **kwargs):
+    def forward(self, ms_feats, query_embed, query_feat, mask_features, **kwargs):
         """Forward function for `TransformerDecoder`.
         Args:
-            query (Tensor): Input query with shape
-                `(num_query, bs, embed_dims)`.
+            query (Tensor): Input query with shape `(num_query, bs, embed_dims)`.
         Returns:
-            Tensor: Results with shape [1, num_query, bs, embed_dims] when
-                return_intermediate is `False`, otherwise it has shape
-                [num_layers, num_query, bs, embed_dims].
+            Tensor: Results with shape [1, num_query, bs, embed_dims] when return_intermediate is `False`, otherwise it has shape [num_layers, num_query, bs, embed_dims].
         """
 
         # get the multi-scale feats
         src = ms_feats['src']
         pos = ms_feats['pos']
-        size_list = ms_feats['size_list']
 
         predictions_bins = []
         predictions_mask = []
@@ -1136,8 +914,7 @@ class PixelTransformerDecoder(BaseModule):
         output = query_feat
 
         for idx, layer in enumerate(self.layers):
-            # // or %
-            # level_index = idx // self.num_feature_levels
+            # // or level_index = idx // self.num_feature_levels
             if self.operation == '%':
                 level_index = idx % self.num_feature_levels
             elif self.operation == '//':
@@ -1145,17 +922,7 @@ class PixelTransformerDecoder(BaseModule):
             else:
                 raise NotImplementedError
 
-            output = layer(
-                output,
-                src[level_index],
-                src[level_index],
-                query_pos=query_embed,
-                key_pos=pos[level_index],
-                attn_masks=None,
-                query_key_padding_mask=None,
-                key_padding_mask=None,
-                **kwargs)
-
+            output = layer(output, src[level_index], src[level_index], query_pos=query_embed, key_pos=pos[level_index], attn_masks=None, query_key_padding_mask=None, key_padding_mask=None, **kwargs)
             outputs_bins, outputs_mask, outputs_class = self.forward_prediction_heads(output, mask_features)
 
             predictions_bins.append(outputs_bins)

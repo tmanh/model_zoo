@@ -29,19 +29,8 @@ class HAHIHeteroNeck(BaseModule):
             Default: None.
     """
 
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 embedding_dim,
-                 scales=[1, 1, 1, 1],
-                 norm_cfg=dict(type='BN', requires_grad=True),
-                 act_cfg=dict(type='ReLU', inplace=True),
-                 cross_att=True,
-                 self_att=True,
-                 constrain=False,
-                 positional_encoding=None,
-                 num_points=8,
-                 ):
+    def __init__(self, in_channels, out_channels, embedding_dim, scales=[1, 1, 1, 1], norm_cfg=dict(type='BN', requires_grad=True), act_cfg=dict(type='ReLU', inplace=True), cross_att=True,
+                 self_att=True, constrain=False, positional_encoding=None, num_points=8):
         super(HAHIHeteroNeck, self).__init__()
         assert isinstance(in_channels, list)
         self.cross_att = cross_att
@@ -52,55 +41,26 @@ class HAHIHeteroNeck(BaseModule):
         self.num_outs = len(scales)
         self.embedding_dim = embedding_dim
         self.constrain = constrain
-        
+
         self.lateral_convs = nn.ModuleList()
         for in_channel, out_channel in zip(in_channels, out_channels):
             self.lateral_convs.append(
-                ConvModule(in_channel,
-                           out_channel,
-                           kernel_size=1,
-                           norm_cfg=norm_cfg,
-                           act_cfg=act_cfg))
+                ConvModule(in_channel, out_channel, kernel_size=1, norm_cfg=norm_cfg, act_cfg=act_cfg))
 
         self.trans_proj = nn.ModuleList()
         for in_channel, out_channel in zip(in_channels[1:], out_channels[1:]):
-            self.trans_proj.append(
-                ConvModule(out_channel,
-                           self.embedding_dim,
-                           kernel_size=1,
-                           norm_cfg=norm_cfg,
-                           act_cfg=act_cfg))
+            self.trans_proj.append(ConvModule(out_channel, self.embedding_dim, kernel_size=1, norm_cfg=norm_cfg, act_cfg=act_cfg))
 
         self.trans_fusion = nn.ModuleList()
         for in_channel, out_channel in zip(out_channels[1:], out_channels[1:]):
-            self.trans_fusion.append(
-                ConvModule(out_channel + self.embedding_dim,
-                           out_channel,
-                           kernel_size=3,
-                           padding=1,
-                           stride=1,
-                           norm_cfg=norm_cfg,
-                           act_cfg=act_cfg))
+            self.trans_fusion.append(ConvModule(out_channel + self.embedding_dim, out_channel, kernel_size=3, padding=1, stride=1, norm_cfg=norm_cfg, act_cfg=act_cfg))
 
-        self.conv_proj = nn.Sequential(
-            ConvModule(in_channels[0],
-                       self.embedding_dim,
-                       kernel_size=1,
-                       norm_cfg=norm_cfg,
-                       act_cfg=act_cfg))
-        
-        self.conv_fusion = nn.Sequential(
-            ConvModule(in_channels[0] + self.embedding_dim,
-                       out_channels[0],
-                       kernel_size=3,
-                       padding=1,
-                       stride=1,
-                       norm_cfg=norm_cfg,
-                       act_cfg=act_cfg))
+        self.conv_proj = nn.Sequential(ConvModule(in_channels[0], self.embedding_dim, kernel_size=1, norm_cfg=norm_cfg, act_cfg=act_cfg))
+        self.conv_fusion = nn.Sequential(ConvModule(in_channels[0] + self.embedding_dim, out_channels[0], kernel_size=3, padding=1, stride=1, norm_cfg=norm_cfg, act_cfg=act_cfg))
 
         ########################################
 
-        num_feature_levels = 4 # transformer feature level
+        num_feature_levels = 4  # transformer feature level
 
         self.trans_positional_encoding = build_positional_encoding(positional_encoding)
         self.conv_positional_encoding = build_positional_encoding(positional_encoding)
@@ -108,23 +68,15 @@ class HAHIHeteroNeck(BaseModule):
         self.reference_points = nn.Linear(self.embedding_dim, 2)
         self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, self.embedding_dim))
 
-        self.multi_att = MultiScaleDeformableAttention(embed_dims=self.embedding_dim,
-                                                       num_levels=4,
-                                                       num_heads=8,
-                                                       num_points=num_points,
-                                                       batch_first=True)
-        self.self_attn = MultiScaleDeformableAttention(embed_dims=self.embedding_dim,
-                                                       num_levels=4,
-                                                       num_heads=8,
-                                                       num_points=num_points,
-                                                       batch_first=True)
-        
+        self.multi_att = MultiScaleDeformableAttention(embed_dims=self.embedding_dim, num_levels=4, num_heads=8, num_points=num_points, batch_first=True)
+        self.self_attn = MultiScaleDeformableAttention(embed_dims=self.embedding_dim, num_levels=4, num_heads=8, num_points=num_points, batch_first=True)
+
     # init weight
     def init_weights(self):
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
-                
+
         xavier_uniform_(self.reference_points.weight.data, gain=1.0)
         constant_(self.reference_points.bias.data, 0.)
         normal_(self.level_embed)
@@ -132,10 +84,10 @@ class HAHIHeteroNeck(BaseModule):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 xavier_init(m, distribution='uniform')
-            
+
             if isinstance(m, MultiScaleDeformableAttention):
                 m.init_weights()
-            
+
     def get_valid_ratio(self, mask):
         _, H, W = mask.shape
         valid_H = torch.sum(~mask[:, :, 0], 1)
@@ -167,10 +119,7 @@ class HAHIHeteroNeck(BaseModule):
         assert len(inputs) == len(self.in_channels)
 
         # input projection
-        feats_projed = [
-            lateral_conv(inputs[i])
-            for i, lateral_conv in enumerate(self.lateral_convs)
-        ]
+        feats_projed = [lateral_conv(inputs[i]) for i, lateral_conv in enumerate(self.lateral_convs)]
 
         feats_trans = feats_projed[1:]
         feat_conv = feats_projed[0]
@@ -188,7 +137,7 @@ class HAHIHeteroNeck(BaseModule):
 
             mask = torch.zeros_like(feats_trans[i][:, 0, :, :]).type(torch.bool)
             masks.append(mask)
-            # pos = self.trans_positional_encoding(feats_trans[i], mask)
+
             pos = self.trans_positional_encoding(mask)
             mask = mask.flatten(1)
             pos_embed = pos.flatten(2).transpose(1, 2)
@@ -205,21 +154,13 @@ class HAHIHeteroNeck(BaseModule):
         mask_flatten = torch.cat(mask_flatten, 1)
         lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1)
         spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=src_flatten.device)
-        level_start_index = torch.cat((spatial_shapes.new_zeros((1, )), spatial_shapes.prod(1).cumsum(0)[:-1]))
+        level_start_index = torch.cat((spatial_shapes.new_zeros((1,)), spatial_shapes.prod(1).cumsum(0)[:-1]))
         valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
 
         reference_points = self.get_reference_points(spatial_shapes, valid_ratios, device=src_flatten.device)
         if self.self_att:
-            src = self.self_attn(
-                src_flatten,
-                key=None,
-                value=None,
-                identity=None,
-                query_pos=lvl_pos_embed_flatten,
-                key_padding_mask=None,
-                reference_points=reference_points,
-                spatial_shapes=spatial_shapes,
-                level_start_index=level_start_index,)
+            src = self.self_attn(src_flatten, key=None, value=None, identity=None, query_pos=lvl_pos_embed_flatten, key_padding_mask=None, reference_points=reference_points,
+                                 spatial_shapes=spatial_shapes, level_start_index=level_start_index)
         else:
             src = src_flatten
 
@@ -228,39 +169,20 @@ class HAHIHeteroNeck(BaseModule):
         bs, c, h, w = conv_skip.shape
         query_mask = torch.zeros_like(conv_skip[:, 0, :, :]).type(torch.bool)
         query = conv_skip.flatten(2).transpose(1, 2)
-        # query_embed = self.conv_positional_encoding(conv_skip, query_mask).flatten(2).transpose(1, 2)
-        query_embed = self.conv_positional_encoding(query_mask).flatten(2).transpose(1, 2)
+
+        query_embed = self.conv_positional_encoding(
+            query_mask).flatten(2).transpose(1, 2)
         reference_points = self.reference_points(query_embed).sigmoid()
         reference_points_input = reference_points[:, :, None] * valid_ratios[:, None]
 
         if self.cross_att:
-            # DepthFormer add geometry constrain
-            # if self.constrain:
-            #     masks = []
-            #     mask = torch.zeros_like(conv_skip[:, 0, :, :]).type(torch.bool)
-            #     masks.append(mask)
-            #     valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
-            #     _spatial_shapes = []
-            #     _spatial_shape = (h, w)
-            #     _spatial_shapes.append(_spatial_shape)
-            #     _spatial_shapes = torch.as_tensor(_spatial_shapes, dtype=torch.long, device=src_flatten.device)
-            #     reference_points_input = self.get_reference_points(_spatial_shapes, valid_ratios, device=src_flatten.device)
-            fusion_res_conv = self.multi_att(
-                query,
-                key=None,
-                value=src,
-                identity=None,
-                query_pos=query_embed,
-                key_padding_mask=None,
-                reference_points=reference_points_input,
-                spatial_shapes=spatial_shapes,
-                level_start_index=level_start_index,)
+            fusion_res_conv = self.multi_att(query, key=None, value=src, identity=None, query_pos=query_embed, key_padding_mask=None, reference_points=reference_points_input,
+                                             spatial_shapes=spatial_shapes, level_start_index=level_start_index)
         else:
             fusion_res_conv = query
 
         fusion_res_conv = fusion_res_conv.permute(0, 2, 1).reshape(bs, c, h, w)
         fusion_res_conv = self.conv_fusion(torch.cat([fusion_res_conv, feat_conv], dim=1))
-
 
         # unfold the feats back to the origin shape
         start = 0
@@ -277,8 +199,7 @@ class HAHIHeteroNeck(BaseModule):
         outs = []
         for i in range(len(feats_trans)):
             if self.scales[i] != 1:
-                x_resize = resize(
-                    fusion_res_trans[i], scale_factor=self.scales[i], mode='bilinear')
+                x_resize = resize(fusion_res_trans[i], scale_factor=self.scales[i], mode='bilinear')
             else:
                 x_resize = fusion_res_trans[i]
             x_resize = self.trans_fusion[i](x_resize)

@@ -73,20 +73,20 @@ class UpSample(nn.Sequential):
         return self.convB(self.convA(torch.cat([up_x, concat_with], dim=1)))
 
 
-
 class UpSampleResidual(nn.Sequential):
     def __init__(self, skip_input, output_features, conv=DynamicConv2d, norm_cfg=None, act=None, requires_grad=True):
         super().__init__()
         self.convA = conv(skip_input, output_features, kernel_size=3, stride=1, norm_cfg=norm_cfg, act=act, requires_grad=requires_grad)
         self.convB = conv(output_features, output_features, kernel_size=3, stride=1, norm_cfg=norm_cfg, act=act, requires_grad=requires_grad)
 
-    def forward(self, x, concat_with):
-        print(x.shape, concat_with.shape)
-        up_x = functional.interpolate(x, size=concat_with.shape[-2:], mode='bilinear', align_corners=True)
-        return self.convB(self.convA(up_x + concat_with))
+    def forward(self, x, concat_with=None):
+        if concat_with is not None:
+            up_x = functional.interpolate(x, size=concat_with.shape[-2:], mode='bilinear', align_corners=True)
+            return self.convB(self.convA(up_x) + concat_with)
+
+        return self.convB(self.convA(x))
 
 
-    
 class DownSample(nn.Sequential):
     def __init__(self, in_channels, out_channels, conv=DynamicConv2d, norm_cfg=None, act=None, requires_grad=True):
         super().__init__()

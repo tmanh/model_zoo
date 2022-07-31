@@ -37,7 +37,7 @@ class BaseDepther(BaseModule, metaclass=ABCMeta):
         return hasattr(self, 'decode_head') and self.decode_head is not None
 
     @abstractmethod
-    def extract_feat(self, imgs):
+    def encode(self, imgs):
         """Placeholder for extract features from images."""
         pass
 
@@ -122,20 +122,13 @@ class BaseDepther(BaseModule, metaclass=ABCMeta):
 
         Args:
             data (dict): The output of dataloader.
-            optimizer (:obj:`torch.optim.Optimizer` | dict): The optimizer of
-                runner is passed to ``train_step()``. This argument is unused
-                and reserved.
+            optimizer (:obj:`torch.optim.Optimizer` | dict): The optimizer of runner is passed to ``train_step()``. This argument is unused and reserved.
 
         Returns:
-            dict: It should contain at least 3 keys: ``loss``, ``log_vars``,
-                ``num_samples``.
-                ``loss`` is a tensor for back propagation, which can be a
-                weighted sum of multiple losses.
-                ``log_vars`` contains all the variables to be sent to the
-                logger.
-                ``num_samples`` indicates the batch size (when the model is
-                DDP, it means the batch size on each GPU), which is used for
-                averaging the logs.
+            dict: It should contain at least 3 keys: ``loss``, ``log_vars``, ``num_samples``.
+                ``loss`` is a tensor for back propagation, which can be a weighted sum of multiple losses.
+                ``log_vars`` contains all the variables to be sent to the logger.
+                ``num_samples`` indicates the batch size (when the model is DDP, it means the batch size on each GPU), which is used for averaging the logs.
         """
         losses = self(**data_batch)
 
@@ -156,8 +149,7 @@ class BaseDepther(BaseModule, metaclass=ABCMeta):
         """The iteration step during validation.
 
         This method shares the same signature as :func:`train_step`, but used
-        during val epochs. Note that the evaluation after training epochs is
-        not implemented with this method, but an evaluation hook.
+        during val epochs. Note that the evaluation after training epochs is not implemented with this method, but an evaluation hook.
         """
         return self(**data_batch, **kwargs)
 
@@ -166,12 +158,10 @@ class BaseDepther(BaseModule, metaclass=ABCMeta):
         """Parse the raw outputs (losses) of the network.
 
         Args:
-            losses (dict): Raw output of the network, which usually contain
-                losses and other necessary information.
+            losses (dict): Raw output of the network, which usually contain losses and other necessary information.
 
         Returns:
-            tuple[Tensor, dict]: (loss, log_vars), loss is the loss tensor
-                which may be a weighted sum of all losses, log_vars contains
+            tuple[Tensor, dict]: (loss, log_vars), loss is the loss tensor which may be a weighted sum of all losses, log_vars contains
                 all the variables to be sent to the logger.
         """
         log_vars = OrderedDict()
@@ -181,11 +171,9 @@ class BaseDepther(BaseModule, metaclass=ABCMeta):
             elif isinstance(loss_value, list):
                 log_vars[loss_name] = sum(_loss.mean() for _loss in loss_value)
             else:
-                raise TypeError(
-                    f'{loss_name} is not a tensor or list of tensors')
+                raise TypeError(f'{loss_name} is not a tensor or list of tensors')
 
-        loss = sum(_value for _key, _value in log_vars.items()
-                   if 'loss' in _key)
+        loss = sum(_value for _key, _value in log_vars.items() if 'loss' in _key)
 
         log_vars['loss'] = loss
         for loss_name, loss_value in log_vars.items():
@@ -197,26 +185,16 @@ class BaseDepther(BaseModule, metaclass=ABCMeta):
 
         return loss, log_vars
 
-    def show_result(self,
-                    img,
-                    result,
-                    win_name='',
-                    show=False,
-                    wait_time=0,
-                    out_file=None,
-                    format_only=False):
+    def show_result(self, img, result, win_name='', show=False, wait_time=0, out_file=None, format_only=False):
         """Draw `result` over `img`.
 
         Args:
             img (str or Tensor): The image to be displayed.
             result (Tensor): The depth estimation results.
             win_name (str): The window name.
-            wait_time (int): Value of waitKey param.
-                Default: 0.
-            show (bool): Whether to show the image.
-                Default: False.
-            out_file (str or None): The filename to write the image.
-                Default: None.
+            wait_time (int): Value of waitKey param. Default: 0.
+            show (bool): Whether to show the image. Default: False.
+            out_file (str or None): The filename to write the image. Default: None.
         Returns:
             img (Tensor): Only if not `show` or `out_file`
         """
@@ -235,6 +213,5 @@ class BaseDepther(BaseModule, metaclass=ABCMeta):
                 mmcv.imwrite(depth.squeeze(), out_file)
 
         if not (show or out_file):
-            warnings.warn('show==False and out_file is not specified, only '
-                          'result depth will be returned')
+            warnings.warn('show==False and out_file is not specified, only result depth will be returned')
             return depth

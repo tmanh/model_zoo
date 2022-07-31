@@ -1,25 +1,13 @@
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from mmcv.cnn import ConvModule
 
-from ..monocular_depth.base_decode import DepthBaseDecodeHead
+from .base_decode import DepthBaseDecodeHead
+from .basics import UpSample
+
 from ..universal.depthformer_basics import HEADS
 
-
-class UpSample(nn.Sequential):
-    '''Fusion module
-    From Adabins
-    '''
-    def __init__(self, skip_input, output_features, conv_cfg=None, norm_cfg=None, act_cfg=None):
-        super(UpSample, self).__init__()
-        self.convA = ConvModule(skip_input, output_features, kernel_size=3, stride=1, padding=1, conv_cfg=conv_cfg, norm_cfg=norm_cfg, act_cfg=act_cfg)
-        self.convB = ConvModule(output_features, output_features, kernel_size=3, stride=1, padding=1, conv_cfg=conv_cfg, norm_cfg=norm_cfg, act_cfg=act_cfg)
-
-    def forward(self, x, concat_with):
-        up_x = F.interpolate(x, size=[concat_with.size(2), concat_with.size(3)], mode='bilinear', align_corners=True)
-        return self.convB(self.convA(torch.cat([up_x, concat_with], dim=1)))
 
 
 @HEADS.register_module()
@@ -28,10 +16,8 @@ class DenseDepthHead(DepthBaseDecodeHead):
     This head is implemented of `DenseDepth: <https://arxiv.org/abs/1812.11941>`_.
     Args:
         up_sample_channels (List): Out channels of decoder layers.
-        fpn (bool): Whether apply FPN head.
-            Default: False
-        conv_dim (int): Default channel of features in FPN head.
-            Default: 256.
+        fpn (bool): Whether apply FPN head. Default: False
+        conv_dim (int): Default channel of features in FPN head. Default: 256.
     """
 
     def __init__(self, up_sample_channels, fpn=False, conv_dim=256, **kwargs):
@@ -39,6 +25,7 @@ class DenseDepthHead(DepthBaseDecodeHead):
 
         self.up_sample_channels = up_sample_channels[::-1]
         self.in_channels = self.in_channels[::-1]
+        self.level2full = 1
 
         self.conv_list = nn.ModuleList()
         up_channel_temp = 0
@@ -67,8 +54,6 @@ class DenseDepthHead(DepthBaseDecodeHead):
                 up_channel_temp = up_channel
 
     def forward(self, inputs):
-        """Forward function."""
-
         temp_feat_list = []
         if self.fpn:
             for index, feat in enumerate(inputs[::-1]):

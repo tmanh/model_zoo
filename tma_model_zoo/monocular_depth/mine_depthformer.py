@@ -7,7 +7,7 @@ from ..universal.resnet import Resnet
 
 from ..enhancement.depth_completion_guided_unet import StageEfficientNet
 
-from ..basics.dynamic_conv import DynamicConv2d, UpSample, UpSampleResidual, DownSample
+from ..basics.dynamic_conv import DynamicConv2d, UpSample, DownSample
 from ..basics.norm import NormBuilder
 from ..universal.swin import SwinTransformerV2
 from ..universal.hahi import HAHIHetero
