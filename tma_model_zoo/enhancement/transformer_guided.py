@@ -7,23 +7,23 @@ from ..universal.resnet import Resnet
 from ..enhancement.base import ConvBlock
 from ..basics.upsampling import Upscale
 from ..basics.dynamic_conv import DynamicConv2d, UpSampleResidual
-from ..monocular_depth.mine_depthformer import DepthFormer, DepthFormerEncode
 
-from .base_guided import BaseFusion, DepthEncoder
-from .cspn_fusion import CSPNFusion
+from .cspn_fusion import BaseCSPNFusion, AdaptiveCSPNFusion
 
 from ..monocular_depth.depthformer import build_depther_from
 from mmcv.runner import load_checkpoint
 
 
 class TransformerGuided(nn.Module):
-    def __init__(self, n_feats=64, mask_channels=16, n_resblocks=8, act=nn.GELU(), model='rgb-m', requires_grad=True):
+    # model: rgb-m, rgbm
+    # refine: None, 'cspn-a', 'cspn-l'
+    def __init__(self, n_feats=64, mask_channels=16, n_resblocks=8, act=nn.GELU(), model='rgb-m', refine='cspn-a', requires_grad=True):
         super().__init__()
 
         self.min_d = 0.0
         self.max_d = 20.0
 
-        self.mode = 'completion'  # estimate, completion
+        self.mode = 'refine'  # estimate, complete, refine
         self.model = model
 
         self.flag = True
@@ -36,7 +36,7 @@ class TransformerGuided(nn.Module):
         self.depth_from_color.min_depth = self.min_d
         self.depth_from_color.max_depth = self.max_d
 
-        if self.mode == 'completion':
+        if self.mode != 'estimate':
             for param in self.depth_from_color.parameters():
                 param.requires_grad = False
             self.depth_from_color.eval()
@@ -72,6 +72,50 @@ class TransformerGuided(nn.Module):
             self.mask_conv = Resnet(1, n_feats, 3, n_resblocks, mask_channels, act, tail=True, requires_grad=requires_grad)
         else:
             self.stem = DynamicConv2d(4, 3, norm_cfg=None, act=nn.GELU(), requires_grad=requires_grad)
+
+        if self.mode != 'complete':
+            for param in self.depth_conv.parameters():
+                param.requires_grad = False
+            self.depth_conv.eval()
+
+            for param in self.downs.parameters():
+                param.requires_grad = False
+            self.downs.eval()
+
+            for param in self.alphas.parameters():
+                param.requires_grad = False
+            self.alphas.eval()
+
+            for param in self.betas.parameters():
+                param.requires_grad = False
+            self.betas.eval()
+
+            for param in self.ups.parameters():
+                param.requires_grad = False
+            self.ups.eval()
+
+            for param in self.out_net.parameters():
+                param.requires_grad = False
+            self.out_net.eval()
+
+            if 'rgb-m' in self.model:
+                for param in self.masks.parameters():
+                    param.requires_grad = False
+                self.masks.eval()
+
+                for param in self.mask_conv.parameters():
+                    param.requires_grad = False
+                self.mask_conv.eval()
+            else:
+                for param in self.stem.parameters():
+                    param.requires_grad = False
+                self.stem.eval()
+
+        self.cspn = None
+        if refine == 'cspn-a':
+            self.cspn = BaseCSPNFusion()
+        elif refine == 'cspn-l':
+            self.cspn = AdaptiveCSPNFusion()
 
     def compute_upscaled_feats(self, feats, guidances, height, width):
         upscaled_feats = feats[0]
@@ -125,22 +169,25 @@ class TransformerGuided(nn.Module):
         if self.mode == 'estimate':
             estimated = self.estimate(color_lr)
             return None, estimated, time.time() - start
+
+        _, _, height, width = depth_lr.shape
+
+        shallow_feats = self.depth_conv(depth_lr)
+        depth_feats = self.compute_down_feats(shallow_feats)
+
+        if 'rgb-m' in self.model:
+            estimated, guidance_feats = self.depth_from_color.extract_feats(color_lr)
+            resolutions = [g.shape[-2:] for g in guidance_feats]
+            mask_feats = self.compute_mask_feats(mask_lr, resolutions)
+            guidance_feats = [guidance_feats[i] * mask_feats[i] for i in range(len(mask_feats))][::-1]
         else:
-            _, _, height, width = depth_lr.shape
+            estimated, guidance_feats = self.depth_from_color.extract_feats(color_lr)
+            guidance_feats = guidance_feats[::-1]
 
-            shallow_feats = self.depth_conv(depth_lr)
-            depth_feats = self.compute_down_feats(shallow_feats)
+        up_feats = shallow_feats + self.compute_upscaled_feats(depth_feats, guidance_feats, height, width)
+        completed = depth_lr + self.out_net(up_feats)
 
-            if 'rgb-m' in self.model:
-                estimated, guidance_feats = self.depth_from_color.extract_feats(color_lr)
-                resolutions = [g.shape[-2:] for g in guidance_feats]
-                mask_feats = self.compute_mask_feats(mask_lr, resolutions)
-                guidance_feats = [guidance_feats[i] * mask_feats[i] for i in range(len(mask_feats))][::-1]
-            else:
-                estimated, guidance_feats = self.depth_from_color.extract_feats(color_lr)
-                guidance_feats = guidance_feats[::-1]
+        if self.cspn is not None:
+            completed = self.cspn(up_feats, depth_lr, completed, mask_lr)
 
-            up_feats = shallow_feats + self.compute_upscaled_feats(depth_feats, guidance_feats, height, width)
-            completed = depth_lr + self.out_net(up_feats)
-
-            return [completed], [functional.interpolate(estimated, size=(color_lr.shape[-2:]), align_corners=False, mode='bilinear')], time.time() - start
+        return [completed], [functional.interpolate(estimated, size=(color_lr.shape[-2:]), align_corners=False, mode='bilinear')], time.time() - start

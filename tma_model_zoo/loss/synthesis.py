@@ -39,12 +39,7 @@ class SIL1Loss(nn.Module):  # Main loss function used in AdaBins paper
         if _target.shape[0] == 0:
             return 0
 
-        mean_g = torch.mean(torch.abs(_output - _target))
-
-        # log_g = torch.log(_output) - torch.log(_target)
-        # dg = torch.var(log_g) + 0.15 * torch.pow(torch.mean(log_g), 2) + mean_g
-
-        return mean_g
+        return torch.mean(torch.abs(_output - _target))
 
 
 class DSRLoss(nn.Module):
@@ -61,7 +56,7 @@ class DSRLoss(nn.Module):
         loss_refine = self.l1(refine, gt_depth_hr)
 
         loss_coarse = 0
-        coarses = tensors['coarses']
+        coarses = tensors['coarse']
         for i in range(len(coarses)):
             if coarses[i].shape[-2] != gt_depth_hr.shape[-2] or coarses[i].shape[-1] != gt_depth_hr.shape[-1]:
                 tmp = functional.interpolate(gt_depth_hr, size=coarses[i].shape[-2:], mode='bicubic', align_corners=True)

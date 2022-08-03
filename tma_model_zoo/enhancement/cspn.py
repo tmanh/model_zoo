@@ -77,15 +77,26 @@ class CSPNGuidanceAccelerate(nn.Module):
         self.generate = convbn(in_channels, self.kernel_size * self.kernel_size - 1, kernel_size=3, stride=1, padding=1)
 
     def forward(self, feature):
+        # compute the surrounding weights => center weight = 1 - sum(surrounding weights) => put the center weight in the middle of the vector
         guide = self.generate(feature)
 
-        # normalization in standard CSPN
-        guide_sum = torch.sum(guide.abs(), dim=1).unsqueeze(1)
+        guide_sum = torch.sum(guide.abs(), dim=1, keepdim=True)
         guide = torch.div(guide, guide_sum)
-        guide_mid = (1 - torch.sum(guide, dim=1)).unsqueeze(1)
+        guide_mid = (1 - torch.sum(guide, dim=1, keepdim=True))
 
         half1, half2 = torch.chunk(guide, 2, dim=1)
         return torch.cat((half1, guide_mid, half2), dim=1)
+
+
+class CSPNGuidanceAdaptive(nn.Module):
+    def __init__(self, in_channels, kernel_size):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.generate = convbn(in_channels, self.kernel_size * self.kernel_size, kernel_size=3, stride=1, padding=1)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, feature):
+        return self.softmax(self.generate(feature))
 
 
 class CSPNAccelerate(nn.Module):
@@ -109,7 +120,7 @@ class CSPNAccelerate(nn.Module):
         input_im2col[:, mid_index:mid_index+1, :] = source_data
         
         # STEP 3: weighted average based on guidance kernel
-        output = torch.einsum('ijk,ijk->ik', (input_im2col, guidance_kernel))
+        output = torch.einsum('ijk,ijk->ik', (input_im2col, guidance_kernel))  # torch.sum(input_im2col * guidance_kernel, dim=1)
         return output.view(bs, 1, h, w)
 
 

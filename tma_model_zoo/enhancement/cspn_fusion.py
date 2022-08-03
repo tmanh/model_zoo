@@ -22,12 +22,15 @@ class BaseCSPNFusion(nn.Module):
 
         self.kernel_conf_layer = convbn(n_feats, 3)
         self.gating_layer = convbn(n_feats, 1)
+
         self.iter_guide_layer3 = CSPNGuidanceAccelerate(n_feats, 3)
         self.iter_guide_layer5 = CSPNGuidanceAccelerate(n_feats, 5)
         self.iter_guide_layer7 = CSPNGuidanceAccelerate(n_feats, 7)
+
         self.CSPN3 = CSPNAccelerate(kernel_size=3, dilation=1, padding=1, stride=1)
         self.CSPN5 = CSPNAccelerate(kernel_size=5, dilation=1, padding=2, stride=1)
         self.CSPN7 = CSPNAccelerate(kernel_size=7, dilation=1, padding=3, stride=1)
+
         self.softmax = nn.Softmax(dim=1)
 
         self.average_kernel3 = generate_average_kernel(kernel_size=3)
@@ -64,6 +67,58 @@ class BaseCSPNFusion(nn.Module):
 
         return kernel_conf3 * modified_depth3 + kernel_conf5 * modified_depth5 + kernel_conf7 * modified_depth7
 
+
+class AdaptiveCSPNFusion(nn.Module):
+    def __init__(self, n_feats=64, n_reps=6):
+        super().__init__()
+
+        self.n_reps = n_reps
+
+        self.reduce = convbn(n_feats, 32)
+
+        self.kernel_conf_layer = convbn(34, 3)
+        self.gating_layer = convbn(34, 1)
+
+        self.iter_guide_layer3 = CSPNGuidanceAdaptive(34, 3)
+        self.iter_guide_layer5 = CSPNGuidanceAdaptive(34, 5)
+        self.iter_guide_layer7 = CSPNGuidanceAdaptive(34, 7)
+
+        self.CSPN3 = CSPNAccelerate(kernel_size=3, dilation=1, padding=1, stride=1)
+        self.CSPN5 = CSPNAccelerate(kernel_size=5, dilation=1, padding=2, stride=1)
+        self.CSPN7 = CSPNAccelerate(kernel_size=7, dilation=1, padding=3, stride=1)
+
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, guidance_feats, base_depth, coarse_depth, valid=None):
+        modified_depth3 = modified_depth5 = modified_depth7 = coarse_depth
+
+        reduced_feats = self.reduce(guidance_feats)
+
+        for _ in range(self.n_reps):
+            merged_feats = torch.cat([reduced_feats, modified_depth3, coarse_depth], dim=1)
+
+            gating = torch.sigmoid(self.gating_layer(merged_feats))
+            if valid is not None:
+                gating = gating * valid
+
+            modified_depth3 = gating * base_depth + (1 - gating) * modified_depth3
+            modified_depth5 = gating * base_depth + (1 - gating) * modified_depth5
+            modified_depth7 = gating * base_depth + (1 - gating) * modified_depth7
+
+            guide3 = self.iter_guide_layer3(merged_feats)
+            guide5 = self.iter_guide_layer5(merged_feats)
+            guide7 = self.iter_guide_layer7(merged_feats)
+
+            modified_depth3 = self.CSPN3(guide3, modified_depth3, coarse_depth)
+            modified_depth5 = self.CSPN5(guide5, modified_depth5, coarse_depth)
+            modified_depth7 = self.CSPN7(guide7, modified_depth7, coarse_depth)
+
+        kernel_conf = self.softmax(self.kernel_conf_layer(merged_feats))
+        kernel_conf3 = kernel_conf[:, 0:1, :, :]
+        kernel_conf5 = kernel_conf[:, 1:2, :, :]
+        kernel_conf7 = kernel_conf[:, 2:3, :, :]
+
+        return kernel_conf3 * modified_depth3 + kernel_conf5 * modified_depth5 + kernel_conf7 * modified_depth7
 
 
 class CSPNFusionUp(nn.Module):

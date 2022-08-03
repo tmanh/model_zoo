@@ -206,6 +206,55 @@ class ResidualDMSR(BaseDMSR):
         super().__init__(n_feats, n_resblock, missing, ResidualMapNet(in_channels=n_feats * 4), device=device)
 
 
+class TopDMSR(BaseDMSR):
+    def __init__(self, in_feats, n_feats, n_resblock, missing, device='cuda'):
+        self.in_feats = in_feats
+        super().__init__(n_feats, n_resblock, missing, ResidualMapNet(in_channels=n_feats * 4), device=device)
+
+    def init_model(self, n_feats, n_resblock, missing, mapnet, device):
+        self.missing = missing
+
+        in_dim = self.in_feats + 1 if self.missing else self.in_feats
+        self.device = device
+
+        # feature extraction
+        m_body = [ResBlock(default_conv, n_feats, 3, act=nn.LeakyReLU(inplace=True)) for _ in range(n_resblock)]
+        m_body.append(default_conv(n_feats, n_feats * 4, 3))
+        self.body = nn.Sequential(*m_body)
+        self.head = nn.Sequential(*[default_conv(in_dim, n_feats, 3)])
+
+        # compute residual of the color for the refinement
+        m_body_4 = [ResBlock(default_conv, n_feats, 3, act=nn.LeakyReLU(inplace=True)) for _ in range(n_resblock)]
+        m_body_4.append(default_conv(n_feats, 1, 3))
+        self.body_end = nn.Sequential(*m_body_4)
+        self.head_end = nn.Sequential(*[default_conv(n_feats * 4 + 1, n_feats, 3)])
+
+        self.upscale = mapnet
+    
+    def forward(self, feats, depth_lr, depth_bicubic, color_hr, mask_lr, pos_mat=None, mapping_mat=None):
+        if mapping_mat is None or pos_mat is None:
+            pos_mat = BaseDMSR.generate_sr_map(in_h=feats.shape[-2], in_w=feats.shape[-1], out_h=depth_bicubic.shape[-2], out_w=depth_bicubic.shape[-1], device=color_hr.device)
+            pos_mat = pos_mat.unsqueeze(0)
+
+        ttt = time.time()
+
+        if self.missing:
+            shallow_features = self.head(torch.cat([feats, mask_lr], dim=1))
+        else:
+            shallow_features = self.head(feats)
+
+        deep_features = self.body(shallow_features)
+
+        coarse, feats = self.upscale(pos_mat, deep_features, depth_lr, depth_bicubic, intermediate=True)
+
+        residual = self.head_end(torch.cat([coarse, feats], dim=1))
+        residual = self.body_end(residual)
+        refine = coarse + residual
+
+        elapsed = time.time() - ttt
+        return refine, [coarse], elapsed
+
+
 class ResidualDMSR2(BaseDMSR):
     def init_model(self, n_feats, n_resblock, missing, mapnet, device):
         self.missing = missing
