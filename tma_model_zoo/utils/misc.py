@@ -43,3 +43,16 @@ def is_power_of_2(n):
     if (not isinstance(n, int)) or (n < 0):
         raise ValueError(f'invalid input for is_power_of_2: {n} (type: {type(n)})')
     return (n & (n - 1) == 0) and n != 0
+
+
+def freeze_module(a_module):
+    for module in a_module.modules():
+        if isinstance(module, nn.BatchNorm2d):
+            if hasattr(module, 'weight'):
+                module.weight.requires_grad_(False)
+            if hasattr(module, 'bias'):
+                module.bias.requires_grad_(False)
+            module.momentum = 0
+    for param in a_module.parameters():
+        param.requires_grad = False
+    a_module.eval()

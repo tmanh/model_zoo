@@ -276,13 +276,10 @@ class SwinTransformerBlock(nn.Module):
         self.compute_attn_mask((H_pad, W_pad), device=x.device)
 
         # Step 1: compute shift offsets if cyclic shift is needed
-        # """
         if self.shift_size > 0:
             shifted_x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
         else:
             shifted_x = x
-        # """
-        # shifted_x = x
 
         # Step 2: partition windows (extracting the non-overlapping windows)
         x_windows = window_partition(shifted_x, self.window_size)  # nW*B, window_size, window_size, C

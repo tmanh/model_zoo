@@ -623,11 +623,9 @@ class DepthFormerSwin(BaseModule):
         self._conv_stem_relu = nn.ReLU(inplace=True)
         self._conv_stem_maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
-    def init_weights(self):
-        if self.pretrained is None:
-            super().init_weights()
-            if self.use_abs_pos_embed:
-                trunc_normal_init(self.absolute_pos_embed, std=0.02)
+    def init_default_weights(self):
+        if self.use_abs_pos_embed:
+            trunc_normal_init(self.absolute_pos_embed, std=0.02)
             for m in self.modules():
                 if isinstance(m, Linear):
                     trunc_normal_init(m.weight, std=.02)
@@ -636,50 +634,64 @@ class DepthFormerSwin(BaseModule):
                 elif isinstance(m, LayerNorm):
                     constant_init(m.bias, 0)
                     constant_init(m.weight, 1.0)
-        elif isinstance(self.pretrained, str):
-            logger = get_root_logger()
-            ckpt = _load_checkpoint(
-                self.pretrained, logger=logger, map_location='cpu')
-            if 'state_dict' in ckpt:
-                state_dict = ckpt['state_dict']
-            elif 'model' in ckpt:
-                state_dict = ckpt['model']
+
+    def load_checkpoint(self):
+        logger = get_root_logger()
+        ckpt = _load_checkpoint(self.pretrained, logger=logger, map_location='cpu')
+            
+        if 'state_dict' in ckpt:
+            state_dict = ckpt['state_dict']
+        elif 'model' in ckpt:
+            state_dict = ckpt['model']
+        else:
+            state_dict = ckpt
+
+        return logger, state_dict
+
+    def standardize_state_dict(self, logger, state_dict):
+        if self.pretrain_style == 'official':
+            state_dict = swin_convert(state_dict)
+
+        # strip prefix of state_dict
+        if list(state_dict.keys())[0].startswith('module.'):
+            state_dict = {k[7:]: v for k, v in state_dict.items()}
+
+        self.reshape_state_dict_abs_pos_embed(logger, state_dict)
+        self.interpolate_pos_bias_table(logger, state_dict)
+
+    def interpolate_pos_bias_table(self, logger, state_dict):
+        relative_position_bias_table_keys = [k for k in state_dict.keys() if 'relative_position_bias_table' in k]
+        for table_key in relative_position_bias_table_keys:
+            table_pretrained = state_dict[table_key]
+            table_current = self.state_dict()[table_key]
+            L1, nH1 = table_pretrained.size()
+            L2, nH2 = table_current.size()
+            if nH1 != nH2:
+                logger.warning(f'Error in loading {table_key}, pass')
+            elif L1 != L2:
+                S1 = int(L1**0.5)
+                S2 = int(L2**0.5)
+                table_pretrained_resized = resize(table_pretrained.permute(1, 0).reshape(1, nH1, S1, S1), size=(S2, S2), mode='bicubic')
+                state_dict[table_key] = table_pretrained_resized.view(nH2, L2).permute(1, 0).contiguous()
+
+    def reshape_state_dict_abs_pos_embed(self, logger, state_dict):
+        if state_dict.get('absolute_pos_embed') is not None:
+            absolute_pos_embed = state_dict['absolute_pos_embed']
+            N1, L, C1 = absolute_pos_embed.shape
+            N2, C2, H, W = self.absolute_pos_embed.shape
+            if N1 != N2 or C1 != C2 or L != H * W:
+                logger.warning('Error in loading absolute_pos_embed, pass')
             else:
-                state_dict = ckpt
+                state_dict['absolute_pos_embed'] = absolute_pos_embed.view(N2, H, W, C2).permute(0, 3, 1, 2).contiguous()
 
-            if self.pretrain_style == 'official':
-                state_dict = swin_convert(state_dict)
+    def init_weights(self):
+        if self.pretrained is None:
+            super().init_weights()
+            self.init_default_weights()
 
-            # strip prefix of state_dict
-            if list(state_dict.keys())[0].startswith('module.'):
-                state_dict = {k[7:]: v for k, v in state_dict.items()}
-
-            # reshape absolute position embedding
-            if state_dict.get('absolute_pos_embed') is not None:
-                absolute_pos_embed = state_dict['absolute_pos_embed']
-                N1, L, C1 = absolute_pos_embed.size()
-                N2, C2, H, W = self.absolute_pos_embed.size()
-                if N1 != N2 or C1 != C2 or L != H * W:
-                    logger.warning('Error in loading absolute_pos_embed, pass')
-                else:
-                    state_dict['absolute_pos_embed'] = absolute_pos_embed.view(N2, H, W, C2).permute(0, 3, 1, 2).contiguous()
-
-            # interpolate position bias table if needed
-            relative_position_bias_table_keys = [k for k in state_dict.keys() if 'relative_position_bias_table' in k]
-            for table_key in relative_position_bias_table_keys:
-                table_pretrained = state_dict[table_key]
-                table_current = self.state_dict()[table_key]
-                L1, nH1 = table_pretrained.size()
-                L2, nH2 = table_current.size()
-                if nH1 != nH2:
-                    logger.warning(f'Error in loading {table_key}, pass')
-                elif L1 != L2:
-                    S1 = int(L1**0.5)
-                    S2 = int(L2**0.5)
-                    table_pretrained_resized = resize(table_pretrained.permute(1, 0).reshape(1, nH1, S1, S1), size=(S2, S2), mode='bicubic')
-                    state_dict[table_key] = table_pretrained_resized.view(nH2, L2).permute(1, 0).contiguous()
-
-            # load state_dict
+        if isinstance(self.pretrained, str):
+            logger, state_dict = self.load_checkpoint()
+            self.standardize_state_dict(logger=logger, state_dict=state_dict)
             self.load_state_dict(state_dict, False)
 
     def conv_stem(self, x):

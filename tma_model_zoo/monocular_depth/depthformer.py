@@ -15,12 +15,12 @@ def build_depther_from(path):
 
 @DEPTHER.register_module()
 class DepthEncoderDecoder(BaseDepther):
-    """Encoder Decoder depther.
-    EncoderDecoder typically consists of backbone, (neck) and decode_head.
+    """Encoder Decoder depther. EncoderDecoder typically consists of backbone, (neck) and decode_head.
     """
 
     def __init__(self, backbone, decode_head, neck=None, train_cfg=None, test_cfg=None, pretrained=None, init_cfg=None):
         super(DepthEncoderDecoder, self).__init__(init_cfg)
+        # TODO: test pretrained
         if pretrained is not None:
             assert backbone.get('pretrained') is None, 'both backbone and depther set pretrained weight'
             backbone.pretrained = pretrained

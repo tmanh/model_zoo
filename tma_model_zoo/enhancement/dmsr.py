@@ -5,7 +5,7 @@ import math
 import torch
 import torch.nn as nn
 
-from .depth_completion_guided_unet import GuidedEfficientNet
+from .guided_depth_completion import GuidedEfficientNet
 from ..universal.resnet import Resnet
 from ..basics.mapnet import *
 
@@ -42,7 +42,7 @@ class LightDMSR(nn.Module):
         super().__init__()
 
         self.upscale = ResidualMapNet
-        self.depth_completion = GuidedEfficientNet(n_feats, act==nn.LeakyReLU(inplace=True), mode='efficient-rgbm-residual')
+        self.depth_completion = GuidedEfficientNet(n_feats=n_feats, act=nn.LeakyReLU(inplace=True), mode='efficient-rgbm-residual')
         self.refine = Resnet(in_dim=n_feats, n_feats=n_feats, kernel_size=3, n_resblock=n_resblock, out_dim=1, tail=True)
 
     @staticmethod
@@ -181,12 +181,6 @@ class BaseDMSR(nn.Module):
         deep_features_2 = self.body_up(deep_features_2)
 
         coarse, feats = self.upscale(pos_mat, deep_features_2, depth_lr, depth_bicubic, intermediate=True)
-
-        """
-        rgb_shallow_features = self.head_rgb(color_hr[:, :, :depth_bicubic.shape[-2], :depth_bicubic.shape[-1]])
-        rgb_deep_features = self.body_rgb(rgb_shallow_features)
-        rgb_deep_features += rgb_shallow_features
-        """
 
         residual = self.head_end(torch.cat([coarse, feats], dim=1))
         residual = self.body_end(residual)

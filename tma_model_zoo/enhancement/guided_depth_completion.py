@@ -14,6 +14,33 @@ from ..universal.resnet import Resnet
 from .base import *
 
 
+StageSpec = namedtuple("StageSpec", ["num_channels", "stage_stamp"],)
+
+efficientnet_b0 = ((24, 3), (40, 4), (112, 9), (320, 16))
+efficientnet_b0 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b0)
+
+efficientnet_b1 = ((24, 5), (40, 8), (112, 16), (320, 23))
+efficientnet_b1 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b1)
+
+efficientnet_b2 = ((24, 5), (48, 8), (120, 16), (352, 23))
+efficientnet_b2 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b2)
+
+efficientnet_b3 = ((32, 5), (48, 8), (136, 18), (384, 26))
+efficientnet_b3 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b3)
+
+efficientnet_b4 = ((32, 6), (56, 10), (160, 22), (448, 32))
+efficientnet_b4 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b4)
+
+efficientnet_b5 = ((40, 8), (64, 13), (176, 27), (512, 39))
+efficientnet_b5 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b5)
+
+efficientnet_b6 = ((40, 9), (72, 15), (200, 31), (576, 45))
+efficientnet_b6 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b6)
+
+efficientnet_b7 = ((48, 11), (80, 18), (224, 38), (640, 55))
+efficientnet_b7 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b7)
+
+
 class GuidedUnetBasic(nn.Module):
     def __init__(self, color_enc_in_channels=None, depth_enc_in_channels=None, enc_out_channels=None, requires_grad=True):
         if color_enc_in_channels is None:
@@ -171,10 +198,27 @@ class GuidedUnet(nn.Module):
 
 
 class GuidedEfficientNet(nn.Module):
-    def __init__(self, n_feats=64, act=nn.ReLU(inplace=True), mode='rgb-m', backbone='efficientnet-b4', enc_in_channels = None, mask_channels=16, n_resblocks=8, requires_grad=True, neck=True):
-        if enc_in_channels is None:
-            enc_in_channels = [48, 32, 56, 160, 448]
+    def __init__(self, n_feats=64, act=nn.ReLU(inplace=True), mode='rgb-m', backbone='efficientnet-b4', mask_channels=16, n_resblocks=8, requires_grad=True, neck=False):
+        """Initialization function
+        [Mask]  ---> (Mask Module) ----> [Mask feats]----| (merge with color feats)
+        [Color] ---> (EfficientNet) ---> [Color feats]---|---> [Guidance feats]--| (merge with depth feats based on guided filter)
+        [Depth] ---> (Resnet) ---------> [Depth feats]---------------------------|----> [Modified depth feats]
+
+        [Modified depth feats]----> (Neck - optional) ----> (Unet) -----> Output
+
+        Args:
+            n_feats (int, optional): dimension of the features. Defaults to 64.
+            act (nn.Module, optional): activation function for the convolutional layer. Defaults to nn.ReLU(inplace=True).
+            mode (str, optional): Activate the mask branch for the network if mode='rgb-m', deactivate if mode='rgbm'. Defaults to 'rgb-m'.
+            backbone (str, optional): The name of the efficient network which is used as the backbone for the guidance branch. Defaults to 'efficientnet-b4'.
+            mask_channels (int, optional): dimension of the intermediate mask features. Defaults to 16.
+            n_resblocks (int, optional): number of residual blocks to extract the feature from the depth map. Defaults to 8.
+            requires_grad (bool, optional): Requires gradient. Defaults to True.
+            neck (bool, optional): Using HAHI neck or not. Defaults to False.
+        """
         super().__init__()
+
+        enc_in_channels = self.get_output_channels_from(backbone)
 
         self.mode = mode
         self.backbone = StageEfficientNet.from_pretrained(backbone, in_channels=4 if 'rgbm' in self.mode else 3, requires_grad=requires_grad)
@@ -200,6 +244,11 @@ class GuidedEfficientNet(nn.Module):
             mask_in_channels = [mask_channels, *enc_in_channels[:-1]]
             self.masks = nn.ModuleList([ConvBlock(i, o, requires_grad=requires_grad) for i, o in zip(mask_in_channels, enc_in_channels)])
             self.mask_conv = Resnet(1, n_feats, 3, n_resblocks, mask_channels, act, tail=True, requires_grad=requires_grad)
+
+    def get_output_channels_from(self, backbone):
+        if backbone == 'efficientnet-b4':
+            enc_in_channels = [48, 32, 56, 160, 448]
+        return enc_in_channels
 
     def compute_upscaled_feats(self, feats, guidances, height, width):
         upscaled_feats = feats[0]
@@ -259,33 +308,6 @@ class GuidedEfficientNet(nn.Module):
         return [out], up_feats, time.time()-start
 
 
-StageSpec = namedtuple("StageSpec", ["num_channels", "stage_stamp"],)
-
-efficientnet_b0 = ((24, 3), (40, 4), (112, 9), (320, 16))
-efficientnet_b0 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b0)
-
-efficientnet_b1 = ((24, 5), (40, 8), (112, 16), (320, 23))
-efficientnet_b1 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b1)
-
-efficientnet_b2 = ((24, 5), (48, 8), (120, 16), (352, 23))
-efficientnet_b2 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b2)
-
-efficientnet_b3 = ((32, 5), (48, 8), (136, 18), (384, 26))
-efficientnet_b3 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b3)
-
-efficientnet_b4 = ((32, 6), (56, 10), (160, 22), (448, 32))
-efficientnet_b4 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b4)
-
-efficientnet_b5 = ((40, 8), (64, 13), (176, 27), (512, 39))
-efficientnet_b5 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b5)
-
-efficientnet_b6 = ((40, 9), (72, 15), (200, 31), (576, 45))
-efficientnet_b6 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b6)
-
-efficientnet_b7 = ((48, 11), (80, 18), (224, 38), (640, 55))
-efficientnet_b7 = tuple(StageSpec(num_channels=nc, stage_stamp=ss) for (nc, ss) in efficientnet_b7)
-
-
 class StageEfficientNet(EfficientNet):
     def update_stages(self, model_name):
         self.multi_scale_output = True
@@ -307,20 +329,16 @@ class StageEfficientNet(EfficientNet):
 
     def forward(self, x):
         x = self._conv_stem(x)
-        block_idx = 0.
+        block_idx = 0
+        list_blocks = [self._blocks[: self.stage_specs[0].stage_stamp],
+            self._blocks[self.stage_specs[0].stage_stamp : self.stage_specs[1].stage_stamp],
+            self._blocks[self.stage_specs[1].stage_stamp : self.stage_specs[2].stage_stamp],
+            self._blocks[self.stage_specs[2].stage_stamp :]]
+
         features = [x]
-        for stage in [
-            self._blocks[:self.stage_specs[0].stage_stamp],
-            self._blocks[self.stage_specs[0].stage_stamp:self.stage_specs[1].stage_stamp],
-            self._blocks[self.stage_specs[1].stage_stamp:self.stage_specs[2].stage_stamp],
-            self._blocks[self.stage_specs[2].stage_stamp:],
-        ]:
+        for stage in list_blocks:
             for block in stage:
                 x = block(x, self._global_params.drop_connect_rate * block_idx / self.num_blocks)
-                block_idx += 1.
-
+                block_idx += 1
             features.append(x)
-
-        if self.multi_scale_output:
-            return features
-        return [x]
+        return features if self.multi_scale_output else [x]

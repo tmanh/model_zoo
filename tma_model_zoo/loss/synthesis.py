@@ -20,10 +20,7 @@ class SILogLoss(nn.Module):  # Main loss function used in AdaBins paper
         g = torch.log(_output) - torch.log(_target)
         dg = torch.var(g) + 0.15 * torch.pow(torch.mean(g), 2)
 
-        if torch.isnan(dg):
-            return 0
-
-        return torch.sqrt(dg)
+        return 0 if torch.isnan(dg) else torch.sqrt(dg)
 
 
 class SIL1Loss(nn.Module):  # Main loss function used in AdaBins paper
@@ -32,14 +29,9 @@ class SIL1Loss(nn.Module):  # Main loss function used in AdaBins paper
 
     def forward(self, output, target):
         mask = (output > 0) & (target > 0)
-
         _output = output[mask]
         _target = target[mask]
-
-        if _target.shape[0] == 0:
-            return 0
-
-        return torch.mean(torch.abs(_output - _target))
+        return 0 if _target.shape[0] == 0 else torch.mean(torch.abs(_output - _target))
 
 
 class DSRLoss(nn.Module):
@@ -82,24 +74,13 @@ class MatterportLoss(nn.Module):
         coarse = tensors['coarse'] if 'coarse' in tensors.keys() else None
 
         loss_refine = 0  # self.si(refine[-1], gt_depth_hr)
-        # """
+
         for i in range(len(refine)):
             if refine[i].shape[-2] != gt_depth_hr.shape[-2] or refine[i].shape[-1] != gt_depth_hr.shape[-1]:
                 tmp = functional.interpolate(gt_depth_hr, size=refine[i].shape[-2:], mode='bicubic', align_corners=True)
                 loss_refine += self.si(refine[i], tmp)
             else:
                 loss_refine += self.si(refine[i], gt_depth_hr)
-        # """
-
-        """
-        if coarse is not None:
-            for i in range(len(coarse)):
-                if refine[i].shape[-2] != gt_depth_hr.shape[-2] or refine[i].shape[-1] != gt_depth_hr.shape[-1]:
-                    tmp = functional.interpolate(gt_depth_hr, size=refine[i].shape[-2:], mode='bicubic', align_corners=True)
-                    loss_refine += self.si(coarse[i], tmp)
-                else:
-                    loss_refine += self.si(coarse[i], gt_depth_hr)
-        """
 
         if not isinstance(loss_refine, float) and not isinstance(loss_refine, int)  and torch.isnan(loss_refine):
             loss_refine = 0.0
@@ -121,23 +102,7 @@ class ProjectionLoss(nn.Module):
         dst_colors = tensors['dst_color']
         dst_depths = tensors['dst_depth']
 
-        prj_depths = tensors['prj_depths']
-
         n_samples, n_views = backprj_colors.shape[:2]
-
-        """
-        dmin, dmax = prj_depths.min(), prj_depths.max()
-        vis = (dst_depths[0, 0] - dst_depths[0, 0].min()) / (dst_depths[0, 0].max() - dst_depths[0, 0].min()) * 255
-        cv2.imshow('dst_depth', vis.detach().cpu().numpy().astype(np.uint8))
-
-        vis = (new_depths[0, 0, 0] - dmin) / (dmax - dmin) * 255
-        cv2.imshow('new_depth-0', vis.detach().cpu().numpy().astype(np.uint8))
-
-        vis = (prj_depths[0, 0, 0] - dmin) / (dmax - dmin) * 255
-        cv2.imshow('prj_depth-0', vis.detach().cpu().numpy().astype(np.uint8))
-        cv2.waitKey()
-        exit()
-        """
 
         lview = 0
         lgeom = 0
@@ -151,7 +116,6 @@ class ProjectionLoss(nn.Module):
 
     def forward(self, tensors):
         c_sampling_maps = tensors['c_samplings']
-        r_sampling_maps = tensors['r_samplings']
         
         coarse = tensors['coarse']
         refined = tensors['refined']
@@ -160,21 +124,6 @@ class ProjectionLoss(nn.Module):
         src_colors = tensors['src_color']
         src_depths = tensors['src_depth']
         dst_colors = tensors['dst_color']
-        dst_depths = tensors['dst_depth']
-
-        """
-        vis = (src_depths[0, 0, 0] - src_depths[0, 0, 0].min()) / (src_depths[0, 0, 0].max() - src_depths[0, 0, 0].min()) * 255
-        vis = vis.detach().cpu().numpy().astype(np.uint8)
-        cv2.imshow('src_depths', vis)
-
-        vis = (coarse[0, 0, 0] - coarse[0, 0, 0].min()) / (coarse[0, 0, 0].max() - coarse[0, 0, 0].min()) * 255
-        vis = vis.detach().cpu().numpy().astype(np.uint8)
-        cv2.imshow('coarse', vis)
-
-        # vis = r_prj_view * 255
-        # vis = vis[0].permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8)
-        # cv2.imshow(f'r_prj_view-{j}', vis)
-        # """
 
         n_samples, n_views = dst_colors.shape[:2]
 
@@ -185,31 +134,10 @@ class ProjectionLoss(nn.Module):
             src_view = src_colors[i:i+1, 0]
 
             c_map = c_sampling_maps[i:i+1, j]
-            # r_map = r_sampling_maps[i:i+1, j]
 
             c_prj_view = functional.grid_sample(tgt_view, c_map, mode='bilinear', padding_mode='zeros', align_corners=True)
-            # r_prj_view = functional.grid_sample(tgt_view, r_map, mode='bilinear', padding_mode='zeros', align_corners=True)
-
-            """
-            vis = (tensors['estimated'][i, 0] - tensors['estimated'][i, 0].min()) / (tensors['estimated'][i, 0].max() - tensors['estimated'][i, 0].min()) * 255
-            vis = vis.detach().cpu().numpy().astype(np.uint8)
-            cv2.imshow(f'estimated-{j}', vis)
-
-            vis = c_prj_view * 255
-            vis = vis[0].permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8)
-            cv2.imshow(f'c_prj_view-{j}', vis)
-
-            # vis = r_prj_view * 255
-            # vis = vis[0].permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8)
-            # cv2.imshow(f'r_prj_view-{j}', vis)
-            # """
 
             lview += self.compute_photometric_loss(c_prj_view, src_view)
-            # lview += self.compute_photometric_loss(r_prj_view, src_view)
-        """
-        cv2.waitKey()
-        exit()
-        # """
 
         return (lview + lgeom) / n_views
 
@@ -226,23 +154,8 @@ class ProjectionLoss(nn.Module):
             d = functional.interpolate(src_depths[:, 0], size=coarse[i].shape[-2:], mode='bilinear', align_corners=True)
             c = functional.interpolate(src_colors[:, 0], size=coarse[i].shape[-2:], mode='bilinear', align_corners=True)
 
-            """
-            vis = (d - d.min()) / (d.max() - d.min()) * 255
-            vis = vis[0, 0].detach().cpu().numpy().astype(np.uint8)
-            cv2.imshow(f'd-{i}', vis)
-
-            vis = (coarse[i] - coarse[i].min()) / (coarse[i].max() - coarse[i].min()) * 255
-            vis = vis[0, 0].detach().cpu().numpy().astype(np.uint8)
-            cv2.imshow(f'coarse-{i}', vis)
-            # """
-
             lgeom = 0.5 * self.si((coarse[i] > 0).float() * d, (d > 0).float() * coarse[i])
             lsmooth = self.compute_smooth_loss(coarse[i], c)
-
-        """
-        cv2.waitKey()
-        exit()
-        # """
 
         return lsmooth + lgeom
 

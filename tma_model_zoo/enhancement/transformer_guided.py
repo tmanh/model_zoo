@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as functional
 
+from mmcv.runner import load_checkpoint
+
 from ..universal.resnet import Resnet
 from ..enhancement.base import ConvBlock
 from ..basics.upsampling import Upscale
@@ -11,8 +13,7 @@ from ..basics.dynamic_conv import DynamicConv2d, UpSampleResidual
 from .cspn_fusion import BaseCSPNFusion, AdaptiveCSPNFusion
 
 from ..monocular_depth.depthformer import build_depther_from
-from mmcv.runner import load_checkpoint
-
+from ..utils.misc import freeze_module
 
 class TransformerGuided(nn.Module):
     # model: rgb-m, rgbm
@@ -74,6 +75,9 @@ class TransformerGuided(nn.Module):
             self.stem = DynamicConv2d(4, 3, norm_cfg=None, act=nn.GELU(), requires_grad=requires_grad)
 
         if self.mode != 'complete':
+            # TODO: check if freeze module is working properly before using it as the default freeze module function
+            # freeze_module(self.depth_conv)
+
             for param in self.depth_conv.parameters():
                 param.requires_grad = False
             self.depth_conv.eval()
