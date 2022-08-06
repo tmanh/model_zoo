@@ -1,5 +1,4 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-import warnings
 from copy import deepcopy
 
 import torch
@@ -41,14 +40,12 @@ class PatchEmbed(BaseModule):
         dilation (int): The dilation rate of embedding conv. Default: 1.
         pad_to_patch_size (bool, optional): Whether to pad feature map shape to multiple patch size. Default: True.
         norm_cfg (dict, optional): Config dict for normalization layer.
-        init_cfg (`mmcv.ConfigDict`, optional): The Config for initialization. Default: None.
     """
 
-    def __init__(self, in_channels=3, embed_dims=768, conv_type=None, kernel_size=16, stride=16, padding=0, dilation=1, pad_to_patch_size=True, norm_cfg=None, init_cfg=None):
+    def __init__(self, in_channels=3, embed_dims=768, conv_type=None, kernel_size=16, stride=16, padding=0, dilation=1, pad_to_patch_size=True, norm_cfg=None):
         super().__init__()
 
         self.embed_dims = embed_dims
-        self.init_cfg = init_cfg
 
         if stride is None:
             stride = kernel_size
@@ -105,11 +102,10 @@ class PatchMerging(BaseModule):
         stride (int | tuple): the stride of the sliding length in the unfold layer. Defaults: 2. (Default to be equal with kernel_size).
         bias (bool, optional): Whether to add bias in linear layer or not. Defaults: False.
         norm_cfg (dict, optional): Config dict for normalization layer. Defaults: dict(type='LN').
-        init_cfg (dict, optional): The extra config for initialization. Defaults: None.
     """
 
-    def __init__(self, in_channels, out_channels, stride=2, bias=False, norm_cfg=dict(type='LN'), init_cfg=None):
-        super().__init__(init_cfg)
+    def __init__(self, in_channels, out_channels, stride=2, bias=False, norm_cfg=dict(type='LN')):
+        super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.stride = stride
@@ -164,7 +160,6 @@ class WindowMSA(BaseModule):
         qk_scale (float | None, optional): Override default qk scale of head_dim ** -0.5 if set. Default: None.
         attn_drop_rate (float, optional): Dropout ratio of attention weight. Default: 0.0
         proj_drop_rate (float, optional): Dropout ratio of output. Default: 0.0
-        init_cfg (dict | None, optional): The Config for initialization. Default: None.
     """
 
     def __init__(self,
@@ -174,8 +169,7 @@ class WindowMSA(BaseModule):
                  qkv_bias=True,
                  qk_scale=None,
                  attn_drop_rate=0.,
-                 proj_drop_rate=0.,
-                 init_cfg=None):
+                 proj_drop_rate=0.):
 
         super().__init__()
         self.embed_dims = embed_dims
@@ -183,7 +177,6 @@ class WindowMSA(BaseModule):
         self.num_heads = num_heads
         head_embed_dims = embed_dims // num_heads
         self.scale = qk_scale or head_embed_dims**-0.5
-        self.init_cfg = init_cfg
 
         # define a parameter table of relative position bias
         self.relative_position_bias_table = nn.Parameter(torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
@@ -259,17 +252,16 @@ class ShiftWindowMSA(BaseModule):
         attn_drop_rate (float, optional): Dropout ratio of attention weight. Defaults: 0.
         proj_drop_rate (float, optional): Dropout ratio of output. Defaults: 0.
         dropout_layer (dict, optional): The dropout_layer used before output. Defaults: dict(type='DropPath', drop_prob=0.).
-        init_cfg (dict, optional): The extra config for initialization. Default: None.
     """
 
-    def __init__(self, embed_dims, num_heads, window_size, shift_size=0, qkv_bias=True, qk_scale=None, attn_drop_rate=0, proj_drop_rate=0, dropout_layer=dict(type='DropPath', drop_prob=0.), init_cfg=None):
-        super().__init__(init_cfg)
+    def __init__(self, embed_dims, num_heads, window_size, shift_size=0, qkv_bias=True, qk_scale=None, attn_drop_rate=0, proj_drop_rate=0, dropout_layer=dict(type='DropPath', drop_prob=0.)):
+        super().__init__()
 
         self.window_size = window_size
         self.shift_size = shift_size
         assert 0 <= self.shift_size < self.window_size
 
-        self.w_msa = WindowMSA(embed_dims=embed_dims, num_heads=num_heads, window_size=to_2tuple(window_size), qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop_rate=attn_drop_rate, proj_drop_rate=proj_drop_rate, init_cfg=None)
+        self.w_msa = WindowMSA(embed_dims=embed_dims, num_heads=num_heads, window_size=to_2tuple(window_size), qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop_rate=attn_drop_rate, proj_drop_rate=proj_drop_rate)
         self.drop = build_dropout(dropout_layer)
 
     def forward(self, query, hw_shape):
@@ -383,23 +375,20 @@ class SwinBlock(BaseModule):
         drop_path_rate (float, optional): Stochastic depth rate. Default: 0.2.
         act_cfg (dict, optional): The config dict of activation function. Default: dict(type='GELU').
         norm_cfg (dict, optional): The config dict of nomalization. Default: dict(type='LN').
-        init_cfg (dict | list | None, optional): The init config. Default: None.
     """
 
     def __init__(self, embed_dims, num_heads, feedforward_channels, window_size=7, shift=False, qkv_bias=True, qk_scale=None, drop_rate=0., attn_drop_rate=0., drop_path_rate=0.,
-                 act_cfg=dict(type='GELU'), norm_cfg=dict(type='LN'), init_cfg=None):
+                 act_cfg=dict(type='GELU'), norm_cfg=dict(type='LN')):
 
         super(SwinBlock, self).__init__()
 
-        self.init_cfg = init_cfg
-
         self.norm1 = build_norm_layer(norm_cfg, embed_dims)[1]
         self.attn = ShiftWindowMSA(embed_dims=embed_dims, num_heads=num_heads, window_size=window_size, shift_size=window_size // 2 if shift else 0, qkv_bias=qkv_bias,
-            qk_scale=qk_scale, attn_drop_rate=attn_drop_rate, proj_drop_rate=drop_rate, dropout_layer=dict(type='DropPath', drop_prob=drop_path_rate), init_cfg=None)
+            qk_scale=qk_scale, attn_drop_rate=attn_drop_rate, proj_drop_rate=drop_rate, dropout_layer=dict(type='DropPath', drop_prob=drop_path_rate))
 
         self.norm2 = build_norm_layer(norm_cfg, embed_dims)[1]
         self.ffn = FFN(embed_dims=embed_dims, feedforward_channels=feedforward_channels, num_fcs=2, ffn_drop=drop_rate, dropout_layer=dict(type='DropPath', drop_prob=drop_path_rate),
-            act_cfg=act_cfg, add_identity=True, init_cfg=None)
+            act_cfg=act_cfg, add_identity=True)
 
     def forward(self, x, hw_shape):
         identity = x
@@ -431,15 +420,12 @@ class SwinBlockSequence(BaseModule):
         drop_path_rate (float, optional): Stochastic depth rate. Default: 0.2.
         downsample (BaseModule | None, optional): The downsample operation module. Default: None.
         act_cfg (dict, optional): The config dict of activation function. Default: dict(type='GELU').
-        norm_cfg (dict, optional): The config dict of nomalization. Default: dict(type='LN'). 
-        init_cfg (dict | list | None, optional): The init config. Default: None.
+        norm_cfg (dict, optional): The config dict of nomalization. Default: dict(type='LN').
     """
 
     def __init__(self, embed_dims, num_heads, feedforward_channels, depth, window_size=7, qkv_bias=True, qk_scale=None, drop_rate=0., attn_drop_rate=0., drop_path_rate=0.,
-                 downsample=None, act_cfg=dict(type='GELU'), norm_cfg=dict(type='LN'), init_cfg=None):
+                 downsample=None, act_cfg=dict(type='GELU'), norm_cfg=dict(type='LN')):
         super().__init__()
-
-        self.init_cfg = init_cfg
 
         drop_path_rate = drop_path_rate if isinstance(
             drop_path_rate,
@@ -448,7 +434,7 @@ class SwinBlockSequence(BaseModule):
         self.blocks = ModuleList()
         for i in range(depth):
             block = SwinBlock(embed_dims=embed_dims, num_heads=num_heads, feedforward_channels=feedforward_channels, window_size=window_size, shift=i % 2 != 0,
-                              qkv_bias=qkv_bias, qk_scale=qk_scale, drop_rate=drop_rate, attn_drop_rate=attn_drop_rate, drop_path_rate=drop_path_rate[i], act_cfg=act_cfg, norm_cfg=norm_cfg, init_cfg=None)
+                              qkv_bias=qkv_bias, qk_scale=qk_scale, drop_rate=drop_rate, attn_drop_rate=attn_drop_rate, drop_path_rate=drop_path_rate[i], act_cfg=act_cfg, norm_cfg=norm_cfg)
 
             self.blocks.append(block)
 
@@ -494,12 +480,11 @@ class DepthFormerSwin(BaseModule):
         norm_cfg (dict): Config dict for normalization layer at output of backone. Defaults: dict(type='LN').
         pretrain_style (str): Choose to use official or mmcls pretrain weights. Default: official.
         pretrained (str, optional): model pretrained path. Default: None.
-        init_cfg (dict, optional): The Config for initialization. Defaults to None.
         
         ### Conv cfg
         conv_cfg (dict | None): Dictionary to construct and config conv layer. When conv_cfg is None, cfg will be set to dict(type='Conv2d'). Default: None.
         conv_norm_cfg (dict): Dictionary to construct and config norm layer. Default: None.
-        depth (int): Depth of resnet, from {18, 34, 50, 101, 152}.
+        resnet_depth (int): Depth of resnet, from {18, 34, 50, 101, 152}.
         num_stages (int): Resnet stages, normally 0. Default: None.
         with_cp (bool): Use checkpoint or not. Using checkpoint will save some memory while slowing down the training speed. Default: False.
         conv_strides (Sequence[int]): Strides of the first block of each stage. Default: (1, 2, 2, 2).,
@@ -517,44 +502,81 @@ class DepthFormerSwin(BaseModule):
         152: (Bottleneck, (3, 8, 36, 3))
     }
 
-    def __init__(self, pretrain_img_size=224, in_channels=3, embed_dims=96, patch_size=4, window_size=7, mlp_ratio=4, depths=(2, 2, 6, 2), num_heads=(3, 6, 12, 24),
-                 strides=(4, 2, 2, 2), out_indices=(0, 1, 2, 3), qkv_bias=True, qk_scale=None, patch_norm=True, drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
-                 use_abs_pos_embed=False, act_cfg=dict(type='GELU'), norm_cfg=dict(type='LN'), pretrain_style='official',
-                 pretrained=None, init_cfg=None, conv_cfg=None, conv_norm_cfg=None, depth=None, num_stages=None, with_cp=False, conv_strides=(1, 2, 2, 2), conv_dilations=(1, 1, 1, 1), style='pytorch', conv_pretrained=None):
+    def __init__(self, pretrain_img_size=224, in_channels=3, embed_dims=96, patch_size=4, window_size=7, mlp_ratio=4, depths=None,
+                 num_heads=None, strides=None, out_indices=None, qkv_bias=True, qk_scale=None, patch_norm=True, drop_rate=0.,
+                 attn_drop_rate=0., drop_path_rate=0.1, use_abs_pos_embed=False, act_cfg=None, norm_cfg=None, pretrain_style='official',
+                 pretrained=None, conv_cfg=None, conv_norm_cfg=None, resnet_depth=None, num_stages=None, conv_strides=None,
+                 conv_dilations=None, conv_pretrained=None):
         super(DepthFormerSwin, self).__init__()
 
-        self.list_feats = []
+        self.norm_cfg = dict(type='LN') if norm_cfg is None else norm_cfg
+        self.act_cfg = dict(type='GELU') if act_cfg is None else act_cfg
+        
+        self.patch_norm_cfg = self.norm_cfg if patch_norm else None
 
+        self.depths = (2, 2, 6, 2) if depths is None else depths
+        self.strides = (4, 2, 2, 2) if strides is None else strides
+
+        self.out_indices = (0, 1, 2, 3) if out_indices is None else out_indices
+        self.num_heads = (3, 6, 12, 24) if num_heads is None else num_heads
+        self.conv_strides = (1, 2, 2, 2) if conv_strides is None else conv_strides
+        self.conv_dilations = (1, 1, 1, 1) if conv_dilations is None else conv_dilations
+
+        self.list_feats = []
         self.conv_cfg = conv_cfg
         self.conv_norm_cfg = conv_norm_cfg
-        self.style = style
-
-        if isinstance(pretrain_img_size, int):
-            pretrain_img_size = to_2tuple(pretrain_img_size)
-        elif isinstance(pretrain_img_size, tuple):
-            if len(pretrain_img_size) == 1:
-                pretrain_img_size = to_2tuple(pretrain_img_size[0])
-            assert len(pretrain_img_size) == 2, f'The size of image should have length 1 or 2, but got {len(pretrain_img_size)}'
-
-        assert pretrain_style in ['official', 'mmcls'], 'We only support load official ckpt and mmcls ckpt.'
-
-        if isinstance(pretrained, str) or pretrained is None:
-            warnings.warn('DeprecationWarning: pretrained is a deprecated, please use "init_cfg" instead')
-        else:
-            raise TypeError('pretrained must be a str or None')
-
-        num_layers = len(depths)
-        self.out_indices = out_indices
         self.use_abs_pos_embed = use_abs_pos_embed
         self.pretrain_style = pretrain_style
         self.pretrained = pretrained
         self.conv_pretrained = conv_pretrained
-        self.init_cfg = init_cfg
 
-        assert strides[0] == patch_size, 'Use non-overlapping patch embed.'
+        self.drop_after_pos = nn.Dropout(p=drop_rate)
 
-        self.patch_embed = PatchEmbed(in_channels=in_channels, embed_dims=embed_dims, conv_type='Conv2d', kernel_size=patch_size, stride=strides[0], pad_to_patch_size=True,
-            norm_cfg=norm_cfg if patch_norm else None, init_cfg=None)
+        assert pretrain_style in ['official', 'mmcls'], 'We only support load official ckpt and mmcls ckpt.'
+        assert self.strides[0] == patch_size, 'Use non-overlapping patch embed.'
+
+        num_layers = len(self.depths)
+
+        self.patch_embed = PatchEmbed(in_channels=in_channels, embed_dims=embed_dims, conv_type='Conv2d', kernel_size=patch_size,
+                                      stride=self.strides[0], pad_to_patch_size=True, norm_cfg=self.patch_norm_cfg)
+
+        self.init_abs_pos_embed(pretrain_img_size, embed_dims, patch_size)
+        self.init_swin_blocks(embed_dims, window_size, mlp_ratio, qkv_bias, qk_scale, drop_rate, attn_drop_rate, drop_path_rate, num_layers)
+        self.init_norm_layers(embed_dims, num_layers)
+        self.init_stem_layer(3, num_stages, resnet_depth)
+        self.init_weights()
+
+    def init_norm_layers(self, embed_dims, num_layers):
+        self.num_features = [int(embed_dims * 2**i) for i in range(num_layers)]
+        
+        # Add a norm layer for each output
+        for i in self.out_indices:
+            layer = build_norm_layer(self.norm_cfg, self.num_features[i])[1]
+            layer_name = f'norm{i}'
+            self.add_module(layer_name, layer)
+
+    def init_swin_blocks(self, embed_dims, window_size, mlp_ratio, qkv_bias, qk_scale, drop_rate, attn_drop_rate, drop_path_rate, num_layers):
+        total_depth = sum(self.depths)
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, total_depth)]  # stochastic depth decay rule
+
+        self.stages = ModuleList()
+        in_channels = embed_dims
+        for i in range(num_layers):
+            if i < num_layers - 1:
+                downsample = PatchMerging(in_channels=in_channels, out_channels=2 * in_channels, stride=self.strides[i + 1], norm_cfg=self.patch_norm_cfg)
+            else:
+                downsample = None
+
+            stage = SwinBlockSequence(embed_dims=in_channels, num_heads=self.num_heads[i], feedforward_channels=mlp_ratio * in_channels, depth=self.depths[i], window_size=window_size, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                drop_rate=drop_rate, attn_drop_rate=attn_drop_rate, drop_path_rate=dpr[:self.depths[i]], downsample=downsample, act_cfg=self.act_cfg, norm_cfg=self.norm_cfg)
+            self.stages.append(stage)
+
+            dpr = dpr[self.depths[i]:]
+            if downsample:
+                in_channels = downsample.out_channels
+
+    def init_abs_pos_embed(self, pretrain_img_size, embed_dims, patch_size):
+        pretrain_img_size = self.convert2tuple(pretrain_img_size)
 
         if self.use_abs_pos_embed:
             patch_row = pretrain_img_size[0] // patch_size
@@ -562,66 +584,43 @@ class DepthFormerSwin(BaseModule):
             num_patches = patch_row * patch_col
             self.absolute_pos_embed = nn.Parameter(torch.zeros((1, num_patches, embed_dims)))
 
-        self.drop_after_pos = nn.Dropout(p=drop_rate)
+    def convert2tuple(self, pretrain_img_size):
+        if isinstance(pretrain_img_size, int):
+            pretrain_img_size = to_2tuple(pretrain_img_size)
+        elif isinstance(pretrain_img_size, tuple):
+            if len(pretrain_img_size) == 1:
+                pretrain_img_size = to_2tuple(pretrain_img_size[0])
+            assert len(pretrain_img_size) == 2, f'The size of image should have length 1 or 2, but got {len(pretrain_img_size)}'
 
-        # stochastic depth
-        total_depth = sum(depths)
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, total_depth)]  # stochastic depth decay rule
+        return pretrain_img_size
 
-        self.stages = ModuleList()
-        in_channels = embed_dims
-        for i in range(num_layers):
-            if i < num_layers - 1:
-                downsample = PatchMerging(in_channels=in_channels, out_channels=2 * in_channels, stride=strides[i + 1], norm_cfg=norm_cfg if patch_norm else None, init_cfg=None)
-            else:
-                downsample = None
+    @property
+    def _conv_stem_norm1(self):
+        return getattr(self, self._conv_stem_norm1_name)
 
-            stage = SwinBlockSequence(embed_dims=in_channels, num_heads=num_heads[i], feedforward_channels=mlp_ratio * in_channels, depth=depths[i], window_size=window_size, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop_rate=drop_rate, attn_drop_rate=attn_drop_rate, drop_path_rate=dpr[:depths[i]], downsample=downsample, act_cfg=act_cfg, norm_cfg=norm_cfg, init_cfg=None)
-            self.stages.append(stage)
-
-            dpr = dpr[depths[i]:]
-            if downsample:
-                in_channels = downsample.out_channels
-
-        self.num_features = [int(embed_dims * 2**i) for i in range(num_layers)]
-        
-        # Add a norm layer for each output
-        for i in out_indices:
-            layer = build_norm_layer(norm_cfg, self.num_features[i])[1]
-            layer_name = f'norm{i}'
-            self.add_module(layer_name, layer)
-
-        # my extended conv stem
-        self._make_stem_layer(3)
+    def init_stem_layer(self, in_channels, num_stages, resnet_depth):
+        self.conv1 = build_conv_layer(self.conv_cfg, in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self._conv_stem_norm1_name, _conv_stem_norm1 = build_norm_layer(self.conv_norm_cfg, 64, postfix=1)
+        self.add_module(self._conv_stem_norm1_name, _conv_stem_norm1)
+        self._conv_stem_relu = nn.ReLU(inplace=True)
+        self._conv_stem_maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
         # default depth=50, num_stages=1, 2, 3, 4
         self.num_stages = num_stages
         self.inplanes = 64
         if num_stages != 0:
-            self.block, stage_blocks = self.arch_settings[depth]
+            self.block, stage_blocks = self.arch_settings[resnet_depth]
             self.stage_blocks = stage_blocks[:num_stages]
             self.res_layers = []
             for i, num_blocks in enumerate(self.stage_blocks):
-                stride = conv_strides[i]
-                dilation = conv_dilations[i]
+                stride = self.conv_strides[i]
+                dilation = self.conv_dilations[i]
                 planes = 64 * 2**i
                 res_layer = ResLayer(self.block, self.inplanes, planes, num_blocks, stride=stride, dilation=dilation, style=self.style, with_cp=with_cp, conv_cfg=conv_cfg, norm_cfg=conv_norm_cfg)
                 self.inplanes = planes * self.block.expansion
                 layer_name = f'layer{i + 1}'
                 self.add_module(layer_name, res_layer)
                 self.res_layers.append(layer_name)
-
-    @property
-    def _conv_stem_norm1(self):
-        return getattr(self, self._conv_stem_norm1_name)
-
-    def _make_stem_layer(self, in_channels):
-        self.conv1 = build_conv_layer(self.conv_cfg, in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        self._conv_stem_norm1_name, _conv_stem_norm1 = build_norm_layer(self.conv_norm_cfg, 64, postfix=1)
-        self.add_module(self._conv_stem_norm1_name, _conv_stem_norm1)
-        self._conv_stem_relu = nn.ReLU(inplace=True)
-        self._conv_stem_maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
     def init_default_weights(self):
         if self.use_abs_pos_embed:

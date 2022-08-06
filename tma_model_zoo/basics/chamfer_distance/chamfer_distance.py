@@ -3,8 +3,12 @@ import os
 from torch.utils.cpp_extension import load
 
 
-f_path = os.path.dirname(__file__)
-cd = load(name='cd', sources=[f'{f_path}/chamfer_distance.cpp', f'{f_path}/chamfer_distance.cu'])
+# TODO: there is a chance that you will face "nvcc fatal: Unknown option '-generate-dependencies-with-compile'" error. To prevent
+# this error, go to the source file of torch.utils.cpp_extension and change the version that is required for building the dependencies
+# at this line "required_cuda_version = packaging.version.parse('10.2')"
+# E.g. If your cuda version is 11.1, then change it to 10.2 ==> 11.2. So, it will skip building and generating the dependencies simultaneously
+f_path = os.path.dirname(os.path.realpath(__file__))
+cd = load(name='cfd', sources=[f'{f_path}/cfd/chamfer_distance.cpp', f'{f_path}/cfd/chamfer_distance.cu'], verbose=True)
 
 
 class ChamferDistanceFunction(torch.autograd.Function):

@@ -194,4 +194,4 @@ class TransformerGuided(nn.Module):
         if self.cspn is not None:
             completed = self.cspn(up_feats, depth_lr, completed, mask_lr)
 
-        return [completed], [functional.interpolate(estimated, size=(color_lr.shape[-2:]), align_corners=False, mode='bilinear')], time.time() - start
+        return [completed], [functional.interpolate(estimated, size=(color_lr.shape[-2:]), align_corners=False, mode='bilinear')], up_feats, time.time() - start

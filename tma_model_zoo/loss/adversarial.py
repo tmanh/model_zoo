@@ -8,12 +8,15 @@ from ..basics.dynamic_conv import DynamicConv2d
 
 class Adversarial(nn.Module):
     def __init__(self, args):
+        """The Adversarial loss object has a network acts as the discriminator and the optimizer of the discriminator.
+
+        Args:
+            args: this contains multiple hyper-parameters to init the optimizer
+        """
         super().__init__()
 
         self.local_discriminator = LocalDiscriminator()
-
         self.loss_d = 0
-
         self.optimizer = make_optimizer(args, self.local_discriminator)
 
     def forward(self, tensors):

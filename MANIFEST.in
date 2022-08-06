@@ -1,0 +1,2 @@
+include tma_model_zoo/basics/chamfer_distance/cfd/*.cu
+include tma_model_zoo/basics/chamfer_distance/cfd/*.cpp

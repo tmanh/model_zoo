@@ -315,7 +315,3 @@ class BinsFormerDecodeHead(DepthBaseDecodeHead):
         losses.update(**log_imgs)
 
         return losses
-
-    def forward_test(self, inputs, img_metas, test_cfg):
-        pred_depths, pred_bins, pred_classes = self.forward(inputs)
-        return pred_depths[-1]

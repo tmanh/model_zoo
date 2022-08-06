@@ -6,9 +6,8 @@ import numpy as np
 import torch.nn as nn
 
 from abc import ABCMeta, abstractmethod
-from mmcv.runner import BaseModule, auto_fp16, force_fp32
+from mmcv.runner import BaseModule
 
-from ..universal.depthformer_utils import resize
 from ..universal.depthformer_basics import build_loss
 
 
@@ -60,9 +59,7 @@ class DepthBaseDecodeHead(BaseModule, metaclass=ABCMeta):
             self.conv_depth = nn.Conv2d(channels, n_bins, kernel_size=3, padding=1, stride=1)
         else:
             self.conv_depth = nn.Conv2d(channels, 1, kernel_size=3, padding=1, stride=1)
-        
 
-        self.fp16_enabled = False
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
 
@@ -70,15 +67,8 @@ class DepthBaseDecodeHead(BaseModule, metaclass=ABCMeta):
         """Extra repr."""
         return f'align_corners={self.align_corners}'
 
-    @auto_fp16()
     @abstractmethod
     def forward(self, inputs):
-        """Placeholder of forward function."""
-        pass
-    
-    @auto_fp16()
-    @abstractmethod
-    def forward(self, inputs, img_metas):
         """Placeholder of forward function."""
         pass
 
@@ -101,19 +91,6 @@ class DepthBaseDecodeHead(BaseModule, metaclass=ABCMeta):
         losses.update(**log_imgs)
 
         return losses
-
-    def forward_test(self, inputs, img_metas, test_cfg):
-        """Forward function for testing.
-        Args:
-            inputs (list[Tensor]): List of multi-level img features.
-            img_metas (list[dict]): List of image info dict where each dict has: 'img_shape', 'scale_factor', 'flip', and may also contain 'filename', 'ori_shape', 'pad_shape', and 'img_norm_cfg'.
-                For details on the values of these keys see `depth/datasets/pipelines/formatting.py:Collect`.
-            test_cfg (dict): The testing config.
-
-        Returns:
-            Tensor: Output depth map.
-        """
-        return self.forward(inputs, img_metas)
 
     def depth_pred(self, feat):
         """Prediction each pixel."""
@@ -140,12 +117,6 @@ class DepthBaseDecodeHead(BaseModule, metaclass=ABCMeta):
             logit = logit / logit.sum(dim=1, keepdim=True)
 
         return torch.einsum('ikmn,k->imn', [logit, bins]).unsqueeze(dim=1)
-
-    @force_fp32(apply_to=('depth_pred', ))
-    def losses(self, depth_pred, depth_gt):
-        """Compute depth loss."""
-        depth_pred = resize(input=depth_pred, size=depth_gt.shape[2:], mode='bilinear', align_corners=self.align_corners, warning=False)
-        return {'loss_depth': self.loss_decode(depth_pred, depth_gt)}
 
     def log_images(self, img_path, depth_pred, depth_gt, img_meta):
         show_img = copy.deepcopy(img_path.detach().cpu().permute(1, 2, 0))
