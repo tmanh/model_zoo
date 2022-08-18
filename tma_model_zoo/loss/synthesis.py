@@ -43,9 +43,18 @@ class DSRLoss(nn.Module):
         self.l2 = nn.MSELoss()
 
     def forward(self, tensors):
-        refine = tensors['refine'] * 255.0
+        if isinstance(tensors['refine'], list):
+            refine = tensors['refine'][-1] * 255.0
+        else:
+            refine = tensors['refine'] * 255.0
+
         gt_depth_hr = tensors['gt_depth_hr'] * 255.0
-        loss_refine = self.l1(refine, gt_depth_hr)
+
+        if refine.shape[-2] != gt_depth_hr.shape[-2] or refine.shape[-1] != gt_depth_hr.shape[-1]:
+            height, width = min(refine.shape[-2], gt_depth_hr.shape[-2]), min(refine.shape[-1], gt_depth_hr.shape[-1])
+            loss_refine = self.l1(refine[:, :, :height, :width], gt_depth_hr[:, :, :height, :width])
+        else:
+            loss_refine = self.l1(refine, gt_depth_hr)
 
         loss_coarse = 0
         coarses = tensors['coarse']
@@ -71,10 +80,7 @@ class MatterportLoss(nn.Module):
         refine = tensors['refine']
         gt_depth_hr = tensors['gt_depth_hr']
 
-        coarse = tensors['coarse'] if 'coarse' in tensors.keys() else None
-
         loss_refine = 0  # self.si(refine[-1], gt_depth_hr)
-
         for i in range(len(refine)):
             if refine[i].shape[-2] != gt_depth_hr.shape[-2] or refine[i].shape[-1] != gt_depth_hr.shape[-1]:
                 tmp = functional.interpolate(gt_depth_hr, size=refine[i].shape[-2:], mode='bicubic', align_corners=True)

@@ -221,7 +221,7 @@ class GuidedEfficientNet(nn.Module):
         enc_in_channels = self.get_output_channels_from(backbone)
 
         self.mode = mode
-        self.backbone = StageEfficientNet.from_pretrained(backbone, in_channels=4 if 'rgbm' in self.mode else 3, requires_grad=requires_grad)
+        self.backbone = StageEfficientNet.from_pretrained(backbone, in_channels=4 if 'rgbm' in self.mode else 3, requires_grad=False)
 
         self.depth_conv = Resnet(1, n_feats, 3, n_resblocks, n_feats, act)
 
@@ -237,7 +237,8 @@ class GuidedEfficientNet(nn.Module):
 
         self.n_output = 1
 
-        self.out_net = DynamicConv2d(n_feats, self.n_output, norm_cfg=None, act=act, requires_grad=requires_grad)
+        self.out_net = DynamicConv2d(n_feats, self.n_output, norm_cfg=None, act=None, requires_grad=requires_grad)
+        # self.out_net = DynamicConv2d(n_feats, self.n_output, norm_cfg=None, act=act, requires_grad=requires_grad)
         self.upscale = Upscale(mode='bilinear')
 
         if 'rgb-m' in self.mode:

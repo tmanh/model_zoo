@@ -6,7 +6,6 @@ from ..universal.depthformer_basics import DEPTHER, build_depther, build_head, b
 
 def build_depther_from(path):
     cfg = Config.fromfile(path)
-    print(cfg)
     return build_depther(cfg.model)
 
 
@@ -59,3 +58,7 @@ class DepthEncoderDecoder(BaseModule):
     def extract_feats(self, img):
         x = self.encode(img)
         return self.decode_head(x), x
+
+    def set_depth_range(self, min_depth, max_depth):
+        self.backbone.min_depth = min_depth
+        self.backbone.max_depth = max_depth

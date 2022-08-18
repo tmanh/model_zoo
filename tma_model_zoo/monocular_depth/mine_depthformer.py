@@ -5,7 +5,7 @@ import torch.nn.functional as functional
 
 from ..universal.resnet import Resnet
 
-from ..enhancement.depth_completion_guided_unet import StageEfficientNet
+from ..enhancement.guided_depth_completion import StageEfficientNet
 
 from ..basics.dynamic_conv import DynamicConv2d, UpSample, DownSample
 from ..basics.norm import NormBuilder

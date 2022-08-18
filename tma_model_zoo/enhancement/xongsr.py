@@ -20,17 +20,42 @@ class BaseNet(nn.Module):
         pass
 
 
+class ConvReLU(nn.Module):
+    def __init__(self, channels: int) -> None:
+        super(ConvReLU, self).__init__()
+        self.conv = nn.Conv2d(channels, channels, (3, 3), (1, 1), (1, 1), bias=False)
+        self.relu = nn.ReLU(True)
+
+    def forward(self, x):
+        out = self.conv(x)
+        out = self.relu(out)
+
+        return out
+
+
 class VDSR(nn.Module):
-    def __init__(self, in_channels):
+    def __init__(self, in_channels, out_channels=1):
         super().__init__()
 
-        self.conv1 = DynamicConv2d(in_channels, 64, 3)
-        self.conv2 = nn.Sequential(*[DynamicConv2d(64, 64, 3) for _ in range(18)])
-        self.conv3 = DynamicConv2d(64, 1, 3, act=None)
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(1, 64, (3, 3), (1, 1), (1, 1), bias=False),
+            nn.ReLU(True),
+        )
+
+        # Features trunk blocks
+        trunk = [ConvReLU(64) for _ in range(18)]
+        self.trunk = nn.Sequential(*trunk)
+
+        # Output layer
+        self.conv2 = nn.Conv2d(64, 1, (3, 3), (1, 1), (1, 1), bias=False)
 
     def forward(self, x):
         identity = x
-        out = self.conv3(self.conv2(self.conv1(x)))
+
+        out = self.conv1(x)
+        out = self.trunk(out)
+        out = self.conv2(out)
+        
         return out + identity
 
 
@@ -64,31 +89,28 @@ class XongMSR(BaseNet):
 
         self.sr = XongSR(device, n_feats, n_resblock, act)
 
-        dcnn_x4 = VDSR(1)
-        dcnn_x2 = VDSR(1)
+        self.dcnn = VDSR(1)
+        self.dcnn_refine = VDSR(1)
 
-        self.dcnn = nn.ModuleList([dcnn_x2, dcnn_x4])
+        self.fuse = nn.Sequential(*[nn.Conv2d(2, 32, 3, padding=1), nn.ReLU(inplace=True),
+                                    nn.Conv2d(32, 32, 1), nn.ReLU(inplace=True),
+                                    nn.Conv2d(32, 2, 3, padding=1), nn.Softmax(dim=1)])
 
-    def forward(self, depth_lr, color_hr):
+    def forward(self, depth_lr, color_hr, depth_bicubic):
         ttt = time.time()
-        _, _, out_height, out_width = color_hr.size()
 
         list_coarse = []
         prev = depth_lr
-        if color_hr.shape[-1] / prev.shape[-1] > 1.0:
-            for i in range(len(self.dcnn)):
-                if i==0 or curr.shape[-1] < color_hr.shape[-1]:
-                    curr = self.sr(prev)
-                    if i > 0:
-                        up = functional.interpolate(prev, size=curr.shape[-2:], mode='bicubic', align_corners=True)
-                        curr = (curr + up) / 2
+        for i in range(2):
+            if i == 0 or prev.shape[-1] < depth_bicubic.shape[-1]:
+                prev = self.sr(prev)
+                prev = self.dcnn(prev)
+                list_coarse.append(prev)
 
-                    prev = self.dcnn[i](curr)
-                    list_coarse.append(prev)
-
-        output = prev
-        if prev.shape[-2] != out_height and prev.shape[-1] != out_width:
-            output = torch.nn.functional.interpolate(prev, size=(out_height, out_width), mode='bicubic', align_corners=True)
+        if len(list_coarse) == 2:
+            output = self.dcnn_refine(list_coarse[-1])
+        else:
+            output = self.dcnn(list_coarse[-1])
 
         elapsed = time.time() - ttt
 

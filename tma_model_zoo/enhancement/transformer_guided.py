@@ -18,13 +18,11 @@ from ..utils.misc import freeze_module
 class TransformerGuided(nn.Module):
     # model: rgb-m, rgbm
     # refine: None, 'cspn-a', 'cspn-l'
-    def __init__(self, n_feats=64, mask_channels=16, n_resblocks=8, act=nn.GELU(), model='rgb-m', refine='cspn-a', requires_grad=True):
+    def __init__(self, n_feats=64, mask_channels=16, n_resblocks=8, act=nn.GELU(), model='rgb-m', refine='cspn-a', requires_grad=True,
+                 min_d=0.0, max_d=20.0):
         super().__init__()
 
-        self.min_d = 0.0
-        self.max_d = 20.0
-
-        self.mode = 'refine'  # estimate, complete, refine
+        self.mode = ['refine']  # estimate, complete, refine, refine_complete
         self.model = model
 
         self.flag = True
@@ -34,13 +32,15 @@ class TransformerGuided(nn.Module):
         else:
             self.depth_from_color = build_depther_from('/scratch/antruong/workspace/myspace/model_zoo/tma_model_zoo/universal/configs/binsformer/binsformer_swint_w7_nyu.py').cuda()  # DepthFormerSwin()
             # load_checkpoint(self.depth_from_color, '/scratch/antruong/workspace/myspace/model_zoo/pretrained/binsformer_swint_nyu_converted.pth', map_location='cpu')
-        self.depth_from_color.min_depth = self.min_d
-        self.depth_from_color.max_depth = self.max_d
 
-        if self.mode != 'estimate':
+        self.set_depth_range(min_d=min_d, max_d=max_d)
+
+        # """
+        if 'estimate' not in self.mode:
             for param in self.depth_from_color.parameters():
                 param.requires_grad = False
             self.depth_from_color.eval()
+        #"""
 
         self.list_feats = self.depth_from_color.list_feats
         self.level2full = self.depth_from_color.level2full
@@ -74,7 +74,8 @@ class TransformerGuided(nn.Module):
         else:
             self.stem = DynamicConv2d(4, 3, norm_cfg=None, act=nn.GELU(), requires_grad=requires_grad)
 
-        if self.mode != 'complete':
+        """
+        if 'complete' not in self.mode:
             # TODO: check if freeze module is working properly before using it as the default freeze module function
             # freeze_module(self.depth_conv)
 
@@ -114,12 +115,16 @@ class TransformerGuided(nn.Module):
                 for param in self.stem.parameters():
                     param.requires_grad = False
                 self.stem.eval()
+        """
 
         self.cspn = None
         if refine == 'cspn-a':
             self.cspn = BaseCSPNFusion()
         elif refine == 'cspn-l':
             self.cspn = AdaptiveCSPNFusion()
+
+    def set_depth_range(self, min_d, max_d):
+        self.depth_from_color.set_depth_range(min_d, max_d)
 
     def compute_upscaled_feats(self, feats, guidances, height, width):
         upscaled_feats = feats[0]
@@ -164,15 +169,14 @@ class TransformerGuided(nn.Module):
 
     def extract_feats(self, depth_lr, color_lr):
         estimated, cfeats = self.depth_from_color.extract_feats(color_lr)
-        # cfeats = self.depth_from_color.extract_feats(color_lr)[::-1]
         completed, dfeat = self.fuse(cfeats, depth_lr)
         return completed, estimated, dfeat
 
     def forward(self, depth_lr, depth_bicubic, color_lr, mask_lr):
         start = time.time()
-        if self.mode == 'estimate':
+        if 'estimate' in self.mode:
             estimated = self.estimate(color_lr)
-            return None, estimated, time.time() - start
+            return None, estimated, None, time.time() - start
 
         _, _, height, width = depth_lr.shape
 
