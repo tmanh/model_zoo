@@ -56,3 +56,5 @@ def freeze_module(a_module):
     for param in a_module.parameters():
         param.requires_grad = False
     a_module.eval()
+
+    return a_module

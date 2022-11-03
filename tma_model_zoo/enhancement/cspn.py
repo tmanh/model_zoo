@@ -77,7 +77,6 @@ class CSPNGuidanceAccelerate(nn.Module):
         self.generate = convbn(in_channels, self.kernel_size * self.kernel_size - 1, kernel_size=3, stride=1, padding=1)
 
     def forward(self, feature):
-        # compute the surrounding weights => center weight = 1 - sum(surrounding weights) => put the center weight in the middle of the vector
         guide = self.generate(feature)
 
         guide_sum = torch.sum(guide.abs(), dim=1, keepdim=True)

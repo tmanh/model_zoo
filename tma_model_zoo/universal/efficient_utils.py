@@ -337,30 +337,39 @@ def convert_state_dict(state_dict):
     state_dict['_conv_head.bn.running_var'] = state_dict.pop('_bn1.running_var')
     state_dict['_conv_head.bn.num_batches_tracked'] = state_dict.pop('_bn1.num_batches_tracked')
 
-    for i in range(32):
-        if i >= 2:
+    # print(state_dict.keys())
+    for i in range(55):
+        if f'_blocks.{i}._expand_conv.weight' in state_dict.keys():
             state_dict[f'_blocks.{i}._expand_conv.conv.weight'] = state_dict.pop(f'_blocks.{i}._expand_conv.weight')
             state_dict[f'_blocks.{i}._expand_conv.bn.weight'] = state_dict.pop(f'_blocks.{i}._bn0.weight')
             state_dict[f'_blocks.{i}._expand_conv.bn.bias'] = state_dict.pop(f'_blocks.{i}._bn0.bias')
             state_dict[f'_blocks.{i}._expand_conv.bn.running_mean'] = state_dict.pop(f'_blocks.{i}._bn0.running_mean')
             state_dict[f'_blocks.{i}._expand_conv.bn.running_var'] = state_dict.pop(f'_blocks.{i}._bn0.running_var')
             state_dict[f'_blocks.{i}._expand_conv.bn.num_batches_tracked'] = state_dict.pop(f'_blocks.{i}._bn0.num_batches_tracked')
-        state_dict[f'_blocks.{i}._depthwise_conv.conv.weight'] = state_dict.pop(f'_blocks.{i}._depthwise_conv.weight')
-        state_dict[f'_blocks.{i}._depthwise_conv.bn.weight'] = state_dict.pop(f'_blocks.{i}._bn1.weight')
-        state_dict[f'_blocks.{i}._depthwise_conv.bn.bias'] = state_dict.pop(f'_blocks.{i}._bn1.bias')
-        state_dict[f'_blocks.{i}._depthwise_conv.bn.running_mean'] = state_dict.pop(f'_blocks.{i}._bn1.running_mean')
-        state_dict[f'_blocks.{i}._depthwise_conv.bn.running_var'] = state_dict.pop(f'_blocks.{i}._bn1.running_var')
-        state_dict[f'_blocks.{i}._depthwise_conv.bn.num_batches_tracked'] = state_dict.pop(f'_blocks.{i}._bn1.num_batches_tracked')
-        state_dict[f'_blocks.{i}._se_reduce.conv.weight'] = state_dict.pop(f'_blocks.{i}._se_reduce.weight')
-        state_dict[f'_blocks.{i}._se_reduce.conv.bias'] = state_dict.pop(f'_blocks.{i}._se_reduce.bias')
-        state_dict[f'_blocks.{i}._se_expand.conv.weight'] = state_dict.pop(f'_blocks.{i}._se_expand.weight')
-        state_dict[f'_blocks.{i}._se_expand.conv.bias'] = state_dict.pop(f'_blocks.{i}._se_expand.bias')
-        state_dict[f'_blocks.{i}._project_conv.conv.weight'] = state_dict.pop(f'_blocks.{i}._project_conv.weight')
-        state_dict[f'_blocks.{i}._project_conv.bn.weight'] = state_dict.pop(f'_blocks.{i}._bn2.weight')
-        state_dict[f'_blocks.{i}._project_conv.bn.bias'] = state_dict.pop(f'_blocks.{i}._bn2.bias')
-        state_dict[f'_blocks.{i}._project_conv.bn.running_mean'] = state_dict.pop(f'_blocks.{i}._bn2.running_mean')
-        state_dict[f'_blocks.{i}._project_conv.bn.running_var'] = state_dict.pop(f'_blocks.{i}._bn2.running_var')
-        state_dict[f'_blocks.{i}._project_conv.bn.num_batches_tracked'] = state_dict.pop(f'_blocks.{i}._bn2.num_batches_tracked')
+        
+        if f'_blocks.{i}._depthwise_conv.weight' in state_dict.keys():
+            state_dict[f'_blocks.{i}._depthwise_conv.conv.weight'] = state_dict.pop(f'_blocks.{i}._depthwise_conv.weight')
+            state_dict[f'_blocks.{i}._depthwise_conv.bn.weight'] = state_dict.pop(f'_blocks.{i}._bn1.weight')
+            state_dict[f'_blocks.{i}._depthwise_conv.bn.bias'] = state_dict.pop(f'_blocks.{i}._bn1.bias')
+            state_dict[f'_blocks.{i}._depthwise_conv.bn.running_mean'] = state_dict.pop(f'_blocks.{i}._bn1.running_mean')
+            state_dict[f'_blocks.{i}._depthwise_conv.bn.running_var'] = state_dict.pop(f'_blocks.{i}._bn1.running_var')
+            state_dict[f'_blocks.{i}._depthwise_conv.bn.num_batches_tracked'] = state_dict.pop(f'_blocks.{i}._bn1.num_batches_tracked')
+
+        if f'_blocks.{i}._se_reduce.weight' in state_dict.keys():
+            state_dict[f'_blocks.{i}._se_reduce.conv.weight'] = state_dict.pop(f'_blocks.{i}._se_reduce.weight')
+            state_dict[f'_blocks.{i}._se_reduce.conv.bias'] = state_dict.pop(f'_blocks.{i}._se_reduce.bias')
+            state_dict[f'_blocks.{i}._se_expand.conv.weight'] = state_dict.pop(f'_blocks.{i}._se_expand.weight')
+            state_dict[f'_blocks.{i}._se_expand.conv.bias'] = state_dict.pop(f'_blocks.{i}._se_expand.bias')
+        
+        if f'_blocks.{i}._project_conv.weight' in state_dict.keys():
+            state_dict[f'_blocks.{i}._project_conv.conv.weight'] = state_dict.pop(f'_blocks.{i}._project_conv.weight')
+            state_dict[f'_blocks.{i}._project_conv.bn.weight'] = state_dict.pop(f'_blocks.{i}._bn2.weight')
+            state_dict[f'_blocks.{i}._project_conv.bn.bias'] = state_dict.pop(f'_blocks.{i}._bn2.bias')
+            state_dict[f'_blocks.{i}._project_conv.bn.running_mean'] = state_dict.pop(f'_blocks.{i}._bn2.running_mean')
+            state_dict[f'_blocks.{i}._project_conv.bn.running_var'] = state_dict.pop(f'_blocks.{i}._bn2.running_var')
+            state_dict[f'_blocks.{i}._project_conv.bn.num_batches_tracked'] = state_dict.pop(f'_blocks.{i}._bn2.num_batches_tracked')
+
+    # print(state_dict.keys())
 
     # print(state_dict.keys())
     # exit()

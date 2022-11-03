@@ -2,9 +2,6 @@ import torch
 import torch.nn as nn
 
 
-Swish = nn.SiLU
-
-
 # A memory-efficient implementation of Swish function
 class SwishImplementation(torch.autograd.Function):
     @staticmethod
@@ -21,5 +18,12 @@ class SwishImplementation(torch.autograd.Function):
 
 
 class MemoryEfficientSwish(nn.Module):
+    def __init__(self, inplace=True):
+        super().__init__()
+
     def forward(self, x):
         return SwishImplementation.apply(x)
+
+
+_has_silu = 'silu' in dir(torch.nn.functional)
+Swish = nn.SiLU if _has_silu else MemoryEfficientSwish

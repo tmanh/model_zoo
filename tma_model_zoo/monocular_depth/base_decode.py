@@ -35,7 +35,7 @@ class DepthBaseDecodeHead(BaseModule, metaclass=ABCMeta):
     def __init__(self, in_channels, channels=96, conv_cfg=None, act_cfg=dict(type='ReLU'), loss_decode=dict(type='SigLoss', valid_mask=True, loss_weight=10),
                  sampler=None, align_corners=False, min_depth=1e-3, max_depth=None, norm_cfg=None, classify=False, n_bins=256, bins_strategy='UD', norm_strategy='linear', scale_up=False):
         super(DepthBaseDecodeHead, self).__init__()
-        
+
         self.in_channels = in_channels
         self.channels = channels
         self.conv_cfg = conv_cfg

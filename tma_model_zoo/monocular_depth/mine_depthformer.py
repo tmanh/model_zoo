@@ -11,13 +11,14 @@ from ..basics.dynamic_conv import DynamicConv2d, UpSample, DownSample
 from ..basics.norm import NormBuilder
 from ..universal.swin import SwinTransformerV2
 from ..universal.hahi import HAHIHetero
+from ..vision_transformer import CCT
 
 
-class EfficientEncode(nn.Module):
+class EfficientEncoder(nn.Module):
     def __init__(self, backbone='efficientnet-b4', requires_grad=True):
         super().__init__()
 
-        self.list_feats = [32, 48, 32, 56, 160, 448]
+        self.init_list_channels(backbone)
         self.stem = DynamicConv2d(3, 32)
         self.backbone = StageEfficientNet.from_pretrained(backbone, in_channels=3, requires_grad=False)
 
@@ -31,13 +32,48 @@ class EfficientEncode(nn.Module):
         for param in self.backbone.parameters():
             param.requires_grad = False
 
-        self.neck = HAHIHetero(in_channels=self.list_feats, out_channels=self.list_feats, embedding_dim=256, num_feature_levels=len(self.list_feats), requires_grad=requires_grad)
+    def init_list_channels(self, backbone):
+        if backbone == 'efficientnet-b4':
+            self.list_feats = [32, 48, 32, 56, 160, 448]
+        elif backbone in ['efficientnet-b0', 'efficientnet-b1']:
+            self.list_feats = [32, 32, 24, 40, 112, 320]
+        elif backbone in ['efficientnet-b2']:
+            self.list_feats = [32, 32, 24, 48, 120, 352]
+        elif backbone in ['efficientnet-b3']:
+            self.list_feats = [32, 40, 32, 48, 136, 384]
+        elif backbone in ['efficientnet-b5']:
+            self.list_feats = [32, 48, 40, 64, 176, 512]
+        elif backbone in ['efficientnet-b6']:
+            self.list_feats = [32, 56, 40, 72, 200, 576]
+        elif backbone in ['efficientnet-b7']:
+            self.list_feats = [32, 64, 48, 80, 224, 640]
         
     def forward(self, color):
         shallow_feats = self.stem(color)
         deep_feats = self.backbone(color)
-        return self.neck([shallow_feats,]+deep_feats)
+        return [shallow_feats,]+deep_feats
 
+
+class Color2DepthEncoder(nn.Module):
+    def __init__(self, backbone, requires_grad=True):
+        super().__init__()
+
+        self.list_feats, self.backbone = self.generate_backbone(backbone, requires_grad)
+        # self.neck = HAHIHetero(in_channels=self.list_feats, out_channels=self.list_feats, embedding_dim=256, num_feature_levels=len(self.list_feats), requires_grad=requires_grad)
+
+    def forward(self, color):
+        return self.backbone(color)
+    
+    @staticmethod
+    def generate_backbone(backbone, requires_grad):
+        if 'efficientnet' in backbone:
+            backbone = EfficientEncoder(backbone, requires_grad=requires_grad)
+            list_feats = backbone.list_feats
+        elif 'CCT' in backbone:
+            backbone = CCT(patch_size=32, dim=1024, depth=6, heads=16, mlp_dim = 2048)
+            list_feats = []
+
+        return list_feats, backbone
 
 class DepthFormerStem(nn.Module):
     def __init__(self, in_dim, out_dims, requires_grad=True):

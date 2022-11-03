@@ -1,3 +1,4 @@
+import os
 import time
 import torch
 import torch.nn as nn
@@ -10,37 +11,66 @@ from ..enhancement.base import ConvBlock
 from ..basics.upsampling import Upscale
 from ..basics.dynamic_conv import DynamicConv2d, UpSampleResidual
 
-from .cspn_fusion import BaseCSPNFusion, AdaptiveCSPNFusion
+from .cspn_fusion import BaseCSPNFusion
 
 from ..monocular_depth.depthformer import build_depther_from
 from ..utils.misc import freeze_module
 
+
 class TransformerGuided(nn.Module):
+    def load_estimator(self, estimator_type):
+        config_path = os.path.abspath(__file__).replace('enhancement/transformer_guided.py', 'universal/configs/')
+
+        if estimator_type == 'binsformer_swint_nyu_converted':
+            config_path = os.path.join(config_path, 'binsformer/binsformer_swint_w7_nyu.py')
+        elif estimator_type == 'depthformer_swint_w7_nyu':
+            config_path = os.path.join(config_path, 'depthformer/depthformer_swint_w7_nyu.py')
+            
+        self.depth_from_color = build_depther_from(config_path)
+
+        pretrained_path = '/scratch/antruong/workspace/myspace/model_zoo/pretrained'
+        pretrained_path = os.path.join(pretrained_path, f'{estimator_type}.pth')
+        load_checkpoint(self.depth_from_color, pretrained_path, map_location='cpu')
+
+    def freeze(self, pretrained_estimator):
+        if pretrained_estimator:
+            freeze_module(self.depth_from_color)
+
+        if 'estimate' not in self.modes:
+            freeze_module(self.depth_from_color)
+
+        if 'complete' not in self.modes:
+            freeze_module(self.depth_conv)
+            freeze_module(self.downs)
+
+            freeze_module(self.alphas)
+            freeze_module(self.betas)
+            freeze_module(self.ups)
+
+            freeze_module(self.out_net)
+
+            if 'rgb-m' in self.model:
+                freeze_module(self.masks)
+                freeze_module(self.mask_conv)
+            else:
+                freeze_module(self.stem)
+
+        if 'refine' not in self.modes and self.cspn is not None:
+            freeze_module(self.cspn)
+
+
     # model: rgb-m, rgbm
-    # refine: None, 'cspn-a', 'cspn-l'
+    # modes: estimate, complete, refine
+    # refine: None, 'cspn-a'
     def __init__(self, n_feats=64, mask_channels=16, n_resblocks=8, act=nn.GELU(), model='rgb-m', refine='cspn-a', requires_grad=True,
-                 min_d=0.0, max_d=20.0):
+                 min_d=0.0, max_d=20.0, estimator_type='depthformer_swint_w7_nyu', pretrained_estimator=False, modes=None):
         super().__init__()
 
-        self.mode = ['refine']  # estimate, complete, refine, refine_complete
+        self.modes = ['refine'] if modes is None else modes
         self.model = model
 
-        self.flag = True
-        if self.flag:
-            self.depth_from_color = build_depther_from('/scratch/antruong/workspace/myspace/model_zoo/tma_model_zoo/universal/configs/depthformer/depthformer_swint_w7_nyu.py').cuda()  # DepthFormerSwin()
-            # load_checkpoint(self.depth_from_color, '/scratch/antruong/workspace/myspace/model_zoo/pretrained/depthformer_swint_w7_nyu.pth', map_location='cpu')
-        else:
-            self.depth_from_color = build_depther_from('/scratch/antruong/workspace/myspace/model_zoo/tma_model_zoo/universal/configs/binsformer/binsformer_swint_w7_nyu.py').cuda()  # DepthFormerSwin()
-            # load_checkpoint(self.depth_from_color, '/scratch/antruong/workspace/myspace/model_zoo/pretrained/binsformer_swint_nyu_converted.pth', map_location='cpu')
-
+        self.load_estimator(estimator_type)
         self.set_depth_range(min_d=min_d, max_d=max_d)
-
-        # """
-        if 'estimate' not in self.mode:
-            for param in self.depth_from_color.parameters():
-                param.requires_grad = False
-            self.depth_from_color.eval()
-        #"""
 
         self.list_feats = self.depth_from_color.list_feats
         self.level2full = self.depth_from_color.level2full
@@ -74,54 +104,11 @@ class TransformerGuided(nn.Module):
         else:
             self.stem = DynamicConv2d(4, 3, norm_cfg=None, act=nn.GELU(), requires_grad=requires_grad)
 
-        """
-        if 'complete' not in self.mode:
-            # TODO: check if freeze module is working properly before using it as the default freeze module function
-            # freeze_module(self.depth_conv)
-
-            for param in self.depth_conv.parameters():
-                param.requires_grad = False
-            self.depth_conv.eval()
-
-            for param in self.downs.parameters():
-                param.requires_grad = False
-            self.downs.eval()
-
-            for param in self.alphas.parameters():
-                param.requires_grad = False
-            self.alphas.eval()
-
-            for param in self.betas.parameters():
-                param.requires_grad = False
-            self.betas.eval()
-
-            for param in self.ups.parameters():
-                param.requires_grad = False
-            self.ups.eval()
-
-            for param in self.out_net.parameters():
-                param.requires_grad = False
-            self.out_net.eval()
-
-            if 'rgb-m' in self.model:
-                for param in self.masks.parameters():
-                    param.requires_grad = False
-                self.masks.eval()
-
-                for param in self.mask_conv.parameters():
-                    param.requires_grad = False
-                self.mask_conv.eval()
-            else:
-                for param in self.stem.parameters():
-                    param.requires_grad = False
-                self.stem.eval()
-        """
-
         self.cspn = None
         if refine == 'cspn-a':
             self.cspn = BaseCSPNFusion()
-        elif refine == 'cspn-l':
-            self.cspn = AdaptiveCSPNFusion()
+
+        self.freeze(pretrained_estimator)
 
     def set_depth_range(self, min_d, max_d):
         self.depth_from_color.set_depth_range(min_d, max_d)
@@ -174,7 +161,7 @@ class TransformerGuided(nn.Module):
 
     def forward(self, depth_lr, depth_bicubic, color_lr, mask_lr):
         start = time.time()
-        if 'estimate' in self.mode:
+        if 'estimate' in self.modes:
             estimated = self.estimate(color_lr)
             return None, estimated, None, time.time() - start
 
