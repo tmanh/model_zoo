@@ -30,7 +30,7 @@ class VGGUNet(nn.Module):
 
         vgg = get_vgg_net(net)
 
-        self.normalize = torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        # self.normalize = torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
         encs = []
         enc = []
@@ -82,7 +82,7 @@ class VGGUNet(nn.Module):
         return nn.Sequential(*mods)
 
     def forward(self, x):
-        x = self.normalize(x)
+        x = self.normalize(x, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
         feats = []
         for enc in self.encs:
@@ -100,6 +100,34 @@ class VGGUNet(nn.Module):
 
         x = feats.pop()
         return x
+
+    @staticmethod
+    def normalize(tensor, mean, std, inplace=False):
+        if not torch.is_tensor(tensor):
+            raise TypeError(f'tensor should be a torch tensor. Got {type(tensor)}.')
+
+        if not inplace:
+            tensor = tensor.clone()
+
+        dtype = tensor.dtype
+        mean = torch.as_tensor(mean, dtype=dtype, device=tensor.device)
+        std = torch.as_tensor(std, dtype=dtype, device=tensor.device)
+
+        if (std == 0).any():
+            raise ValueError(f'std evaluated to zero after conversion to {dtype}, leading to division by zero.')
+
+        if mean.ndim == 1 and tensor.ndim == 3:
+            mean = mean[:, None, None]
+        if mean.ndim == 1 and tensor.ndim == 4:
+            mean = mean[None, :, None, None]
+        
+        if std.ndim == 1 and tensor.ndim == 3:
+            std = std[:, None, None]
+        if std.ndim == 1 and tensor.ndim == 4:
+            std = std[None, :, None, None]
+        
+        tensor.sub_(mean).div_(std)
+        return tensor
 
 
 class VGGResidualUNet(nn.Module):

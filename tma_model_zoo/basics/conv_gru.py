@@ -1,5 +1,8 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as functional
+
+from tma_model_zoo.universal.swin import SwinTransformerBlock
 
 
 class ConvGRU2d(nn.Module):
@@ -25,6 +28,52 @@ class ConvGRU2d(nn.Module):
 
         combined = torch.cat([x, r * h], dim=1)
         n = self.act(self.conv_can(combined))
+
+        return z * h + (1 - z) * n
+
+
+class SwinConvGRU2d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, act=torch.tanh, bias=True):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+        window_size = 4
+        num_heads = out_channels // 32
+
+        self.swin = SwinTransformerBlock(dim=out_channels,
+                             num_heads=num_heads, window_size=window_size,
+                             shift_size=0,
+                             mlp_ratio=4.0,
+                             qkv_bias=True,
+                             drop=0.05, attn_drop=0.05,
+                             drop_path=0.05,
+                             norm_layer=nn.LayerNorm,
+                             pretrained_window_size=False)
+
+        self.conv_gate = nn.Conv2d(in_channels=2 * out_channels, out_channels=2 * out_channels, kernel_size=kernel_size, padding=padding, bias=bias)
+        self.conv_can = nn.Conv2d(in_channels=in_channels + out_channels, out_channels=out_channels, kernel_size=kernel_size, padding=padding, bias=bias)
+
+        self.act = act
+
+    def forward(self, x, h=None):
+        if h is None:
+            h = torch.zeros((x.shape[0], self.out_channels, x.shape[2], x.shape[3]), dtype=x.dtype, device=x.device)
+
+        combined = torch.cat([x, h], dim=1)
+
+        combined = torch.cat([x, h], dim=1)
+        gating = torch.sigmoid(self.conv_gate(combined))
+
+        r = gating[:, :self.out_channels]
+        z = gating[:, self.out_channels:]
+
+        combined_feats = torch.cat([x, r * h], dim=1)
+
+        N, _, H, W = combined.shape
+        combined_feats = self.conv_can(combined_feats)
+        combined_feats = self.swin(combined_feats.permute(0, 2, 3, 1).view(N, H * W, -1), combined.shape[-2:])  # N, C, H, W
+        n = self.act(combined_feats.view(N, H, W, -1).permute(0, 3, 1, 2))
 
         return z * h + (1 - z) * n
 

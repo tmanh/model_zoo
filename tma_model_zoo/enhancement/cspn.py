@@ -13,7 +13,6 @@ def convbn(in_channels, out_channels, kernel_size=3,stride=1, padding=1):
 	)
 
 
-
 def average_by_kernel(kernel, weight):
     kernel_size = int(math.sqrt(kernel.size()[1]))
     return functional.conv2d(kernel, weight, stride=1, padding=(kernel_size-1) // 2)
