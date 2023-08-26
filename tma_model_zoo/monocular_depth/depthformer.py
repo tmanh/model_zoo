@@ -1,5 +1,5 @@
-from mmcv.runner import BaseModule
-from mmcv.utils import Config
+from mmengine.model import BaseModule
+from mmengine.config import Config
 
 from ..universal.depthformer_basics import DEPTHER, build_depther, build_head, build_neck, build_backbone
 

@@ -138,6 +138,123 @@ class GRUUNet(BaseGRUUNet):
         return x, hs
 
 
+class DepthGRUUNet(BaseGRUUNet):
+    def __init__(self, channels_in, enc_channels = None, dec_channels = None, n_enc_convs=3, n_dec_convs=3, gru_all=False,
+                 act=nn.ReLU(inplace=True), enc_gru_conv=ConvGRU2d, dec_gru_conv=ConvGRU2d, last_conv=ConvGRU2d, conv=nn.Conv2d):
+        if enc_channels is None:
+            enc_channels = [64, 128, 256, 512]
+        if dec_channels is None:
+            dec_channels = [256, 128, 64]
+
+        super().__init__(channels_in, enc_channels, dec_channels, n_enc_convs, n_dec_convs, gru_all, act, enc_gru_conv, dec_gru_conv, last_conv, conv)
+        
+        self.d_encoders = []
+        self.init_depth_encoders()
+
+    def _d_enc(self, channels_in, channels_out, stride=2, n_convs=2, groups=1):
+        mods = []
+        if stride > 1:
+            mods.append(nn.AvgPool2d(kernel_size=2))
+        for _ in range(n_convs):
+            mods.extend((self.conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False, groups=groups), self.act))
+            channels_in = channels_out
+            stride = 1
+        return nn.Sequential(*mods)
+
+    def init_depth_encoders(self):
+        cin = 1
+        stride = 1
+        groups = 1
+        for cout in self.enc_channels:
+            cout = cout // 4
+            self.d_encoders.append(self._d_enc(cin, cout, stride=stride, n_convs=self.n_enc_convs - 1, groups=groups))
+            stride = 2
+            groups = cout // 16 if cout >= 16 else cout // 8
+            cin = cout
+        self.d_encoders = nn.ModuleList(self.d_encoders)
+
+    def init_encoders(self):
+        cin = self.in_channels
+        stride = 1
+        groups = 1
+        for cout in self.enc_channels:
+            self.encoders.append(self._enc(cin, cout, stride=stride, n_convs=self.n_enc_convs, gru_all=self.gru_all, groups=groups))
+            stride = 2
+            groups = 1
+            cin = cout
+        self.encoders = nn.ModuleList(self.encoders)
+
+    def _enc(self, channels_in, channels_out, stride=2, n_convs=2, gru_all=False, groups=1):
+        mods = []
+        if stride > 1:
+            mods.append(nn.AvgPool2d(kernel_size=2))
+        for idx in range(n_convs):
+            if gru_all or idx == n_convs - 1:
+                self.n_rnn += 1
+                mods.append(self.enc_gru_conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False))
+            else:
+                mods.extend((self.conv(channels_in, channels_out, kernel_size=3, padding=1, bias=False, groups=groups), self.act))
+
+            channels_in = channels_out
+            stride = 1
+        return nn.Sequential(*mods)
+
+    def init_decoders(self):
+        cin = self.enc_channels[-1] + self.enc_channels[-2]
+        decs = []
+        for idx, cout in enumerate(self.dec_channels):
+            decs.append(self._dec(cin, cout, n_convs=self.n_dec_convs, gru_all=self.gru_all))
+            cin = cout + self.enc_channels[max(-idx - 3, -len(self.enc_channels))]
+        self.decs = nn.ModuleList(decs)
+
+    def encode(self, c, d, c_hs, d_hs):
+        c_hidx = 0
+        c_feats = []
+        for c_enc, d_enc in zip(self.encoders, self.d_encoders):
+            for c_mod, d_mod in zip(c_enc, d_enc):
+                d = d_mod(d)
+                if isinstance(c_mod, self.enc_gru_conv):
+                    c = c_mod(c, d, c_hs[c_hidx], d_hs[c_hidx])
+                    c_hs[c_hidx] = c
+                    d_hs[c_hidx] = d
+                    c_hidx += 1
+                else:
+                    c = c_mod(c)
+            c_feats.append(c)
+
+        return c, c_feats, c_hidx
+
+    def forward(self, c, d, c_hs=None, d_hs=None):
+        if c_hs is None:
+            c_hs = [None for _ in range(self.n_rnn)]
+            d_hs = [None for _ in range(self.n_rnn)]
+
+        c, feats, hidx = self.encode(c, d, c_hs, d_hs)
+        c, c_hs = self.decode(c, c_hs, feats, hidx)
+        
+        return c, c_hs, d_hs
+
+    def decode(self, x, hs, feats, hidx):
+        for dec in self.decs:
+            x0 = feats.pop()
+            x1 = feats.pop()
+            x0 = functional.interpolate(x0, size=(x1.shape[2], x1.shape[3]), mode='nearest')
+            x = torch.cat((x0, x1), dim=1)
+            del x0, x1
+            for mod in dec:
+                if isinstance(mod, (self.dec_gru_conv, self.last_conv)):
+                    x = mod(x, hs[hidx])
+                    hs[hidx] = x
+                    hidx += 1
+                else:
+                    x = mod(x)
+            feats.append(x)
+
+        x = feats.pop()
+
+        return x, hs
+
+
 class MemorySavingGRUUNet(BaseGRUUNet):
     def __init__(self, channels_in, enc_channels = None, dec_channels = None, n_enc_convs=3, n_dec_convs=3, gru_all=False, act=nn.ReLU(inplace=True), enc_gru_conv=ConvGRU2d, dec_gru_conv=ConvGRU2d, last_conv=ConvGRU2d, conv=nn.Conv2d):
         if enc_channels is None:

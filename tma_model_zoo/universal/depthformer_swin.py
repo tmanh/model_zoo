@@ -9,13 +9,14 @@ from torch.nn.modules.linear import Linear
 from torch.nn.modules.normalization import LayerNorm
 from torch.nn.modules.utils import _pair as to_2tuple
 
+from mmengine.model import trunc_normal_init
 
-from mmcv.cnn import build_norm_layer, trunc_normal_init
+from mmcv.cnn import build_norm_layer
 from mmcv.cnn.bricks.transformer import FFN, build_dropout
-from mmcv.cnn.utils.weight_init import constant_init
-from mmcv.runner import _load_checkpoint
-from mmcv.runner.base_module import BaseModule, ModuleList
-from mmcv.utils import Config
+from mmengine.model import constant_init
+from mmengine.runner.checkpoint import _load_checkpoint
+from mmengine.model import BaseModule, ModuleList
+from mmengine.config import Config
 
 from .depthformer_basics import BACKBONES, ResLayer, BasicBlock, Bottleneck, build_conv_layer
 from .depthformer_utils import swin_convert, get_root_logger, resize

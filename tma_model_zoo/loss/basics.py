@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as functional
 
 import torchvision
+import torchvision.models as tmodels
 
 from math import exp
 from torch.autograd import Variable
@@ -194,9 +195,9 @@ class VGGPerceptualLoss(nn.Module):
         self.mode = mode
 
         if mode == 'vgg19':
-            self.vgg = torchvision.models.vgg19(pretrained=True).features
+            self.vgg = tmodels.vgg19(weights=tmodels.VGG19_Weights.DEFAULT).features
         else:
-            self.vgg = torchvision.models.vgg16(pretrained=True).features
+            self.vgg = tmodels.vgg16(weights=tmodels.VGG16_Weights.DEFAULT).features
 
     def forward(self, tensors):
         es = tensors['coarse']

@@ -51,31 +51,33 @@ class SwinConvGRU2d(nn.Module):
                              norm_layer=nn.LayerNorm,
                              pretrained_window_size=False)
 
-        self.conv_gate = nn.Conv2d(in_channels=2 * out_channels, out_channels=2 * out_channels, kernel_size=kernel_size, padding=padding, bias=bias)
-        self.conv_can = nn.Conv2d(in_channels=in_channels + out_channels, out_channels=out_channels, kernel_size=kernel_size, padding=padding, bias=bias)
+        self.conv_gate = nn.Conv2d(in_channels=in_channels + out_channels, out_channels=2 * out_channels, kernel_size=kernel_size, padding=padding, bias=bias)
+        self.conv_dgate = nn.Conv2d(in_channels=(in_channels + out_channels) // 4, out_channels=2 * out_channels, kernel_size=1, padding=0, bias=bias)
+        self.conv_can = nn.Conv2d(in_channels=2 * out_channels, out_channels=out_channels, kernel_size=kernel_size, padding=padding, bias=bias)
 
         self.act = act
 
-    def forward(self, x, h=None):
-        if h is None:
-            h = torch.zeros((x.shape[0], self.out_channels, x.shape[2], x.shape[3]), dtype=x.dtype, device=x.device)
+    def forward(self, c, d, ch, dh):
+        if ch is None:
+            ch = torch.zeros((c.shape[0], self.out_channels, c.shape[2], c.shape[3]), dtype=c.dtype, device=c.device)
+            dh = torch.zeros((d.shape[0], self.out_channels // 4, d.shape[2], d.shape[3]), dtype=c.dtype, device=c.device)
 
-        combined = torch.cat([x, h], dim=1)
-
-        combined = torch.cat([x, h], dim=1)
-        gating = torch.sigmoid(self.conv_gate(combined))
+        combined = torch.cat([c, ch], dim=1)
+        depth_combined = torch.cat([d, dh], dim=1)
+        gating = torch.sigmoid(self.conv_gate(combined * self.conv_dgate(depth_combined)))
 
         r = gating[:, :self.out_channels]
         z = gating[:, self.out_channels:]
 
-        combined_feats = torch.cat([x, r * h], dim=1)
+        combined_feats = torch.cat([c, r * ch], dim=1)
 
         N, _, H, W = combined.shape
-        combined_feats = self.conv_can(combined_feats)
-        combined_feats = self.swin(combined_feats.permute(0, 2, 3, 1).view(N, H * W, -1), combined.shape[-2:])  # N, C, H, W
-        n = self.act(combined_feats.view(N, H, W, -1).permute(0, 3, 1, 2))
+        combined_feats = self.act(self.conv_can(combined_feats))
 
-        return z * h + (1 - z) * n
+        n = self.swin(combined_feats.permute(0, 2, 3, 1).view(N, H * W, -1), combined.shape[-2:])
+        n = n.view(N, H, W, -1).permute(0, 3, 1, 2)
+
+        return z * ch + (1 - z) * n
 
 
 class LightGRU2d(nn.Module):

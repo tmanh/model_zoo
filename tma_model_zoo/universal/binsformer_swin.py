@@ -11,14 +11,18 @@ from torch.nn.modules.linear import Linear
 from torch.nn.modules.normalization import LayerNorm
 from torch.nn.modules.utils import _pair as to_2tuple
 
-from mmcv.cnn import build_norm_layer, trunc_normal_init
+from mmengine.model import trunc_normal_init
+from mmengine.model.weight_init import constant_init
+
+from mmcv.cnn import build_norm_layer
 from mmcv.cnn.bricks.transformer import FFN, build_dropout
-from mmcv.cnn.utils.weight_init import constant_init
-from mmcv.runner import _load_checkpoint
-from mmcv.runner.base_module import BaseModule, ModuleList
+
+from mmengine.runner.checkpoint import _load_checkpoint
+
+from mmengine.model import BaseModule, ModuleList
 
 from ..universal.depthformer_utils import resize, get_root_logger, swin_convert
-from ..universal.depthformer_basics import ATTENTION, BACKBONES
+# from ..universal.depthformer_basics import ATTENTION, BACKBONES
 from ..universal.depthformer_swin import PatchEmbed
 
 
@@ -91,7 +95,7 @@ class PatchMerging(BaseModule):
         return x, down_hw_shape
 
 
-@ATTENTION.register_module()
+# @ATTENTION.register_module()
 class WindowMSA(BaseModule):
     """Window based multi-head self-attention (W-MSA) module with relative
     position bias.
@@ -198,7 +202,7 @@ class WindowMSA(BaseModule):
         return (seq1[:, None] + seq2[None, :]).reshape(1, -1)
 
 
-@ATTENTION.register_module()
+# @ATTENTION.register_module()
 class ShiftWindowMSA(BaseModule):
     """Shift Window Multihead Self-Attention Module.
 
@@ -491,7 +495,7 @@ class SwinBlockSequence(BaseModule):
             return x, hw_shape, x, hw_shape
 
 
-@BACKBONES.register_module()
+# @BACKBONES.register_module()
 class SwinTransformer(BaseModule):
     """ Swin Transformer
     A PyTorch implement of : `Swin Transformer: Hierarchical Vision Transformer using Shifted Windows` - https://arxiv.org/abs/2103.14030

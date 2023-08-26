@@ -6,8 +6,10 @@ import torch.nn as nn
 
 from torch.nn.init import xavier_uniform_, constant_, normal_
 
-from mmcv.runner import BaseModule
-from mmcv.cnn import ConvModule, xavier_init
+from mmengine.model import xavier_init
+from mmengine.model import BaseModule
+
+from mmcv.cnn import ConvModule
 from mmcv.cnn.bricks.transformer import build_positional_encoding
 from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttention
 

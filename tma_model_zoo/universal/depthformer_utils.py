@@ -5,7 +5,6 @@ import matplotlib
 import torch.nn.functional as functional
 
 from collections import OrderedDict
-from mmcv.utils import get_logger
 
 
 def swin_convert(ckpt):
@@ -72,7 +71,7 @@ def get_root_logger(log_file=None, log_level=logging.INFO, name='mmcv'):
     Returns:
         :obj:`logging.Logger`: The obtained logger
     """
-    logger = get_logger(name=name, log_file=log_file, log_level=log_level)
+    logger = logging.getLogger()
 
     # add a logging filter
     logging_filter = logging.Filter(name)

@@ -9,25 +9,27 @@ import torch.utils.checkpoint as cp
 
 from torch.nn.init import normal_
 
+from mmengine.model import xavier_init
+
 from mmcv.cnn import build_norm_layer, build_plugin_layer, build_upsample_layer, ConvModule
-from mmcv.cnn import build_activation_layer, build_conv_layer, build_norm_layer, xavier_init
-from mmcv.runner.base_module import BaseModule, ModuleList
+from mmcv.cnn import build_conv_layer, build_norm_layer
+from mmengine.model import BaseModule, ModuleList
+from mmengine.registry import MODELS as MMCV_MODELS
+# from mmengine.registry import ATTENTION as MMCV_ATTENTION
+# from mmengine.registry import TRANSFORMER_LAYER, TRANSFORMER_LAYER_SEQUENCE
 
-from mmcv.cnn import MODELS as MMCV_MODELS
-from mmcv.cnn.bricks.registry import ATTENTION as MMCV_ATTENTION
-from mmcv.cnn.bricks.registry import TRANSFORMER_LAYER, TRANSFORMER_LAYER_SEQUENCE
-from mmcv.cnn.bricks.transformer import POSITIONAL_ENCODING
+# from mmcv.cnn.bricks.transformer import POSITIONAL_ENCODING
 
-from mmcv.utils import Registry, build_from_cfg
+from mmengine.registry import Registry, build_from_cfg
 from mmcv.cnn.bricks.transformer import build_transformer_layer_sequence, build_attention, build_transformer_layer, build_feedforward_network, TransformerLayerSequence
 from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttention
-from mmcv import ConfigDict
+from mmengine.config import ConfigDict
 
 
 conv_cfg = {'Conv': nn.Conv2d}
 
 MODELS = Registry('models', parent=MMCV_MODELS)
-ATTENTION = Registry('attention', parent=MMCV_ATTENTION)
+# ATTENTION = Registry('attention', parent=MMCV_ATTENTION)
 
 BACKBONES = MODELS
 NECKS = MODELS
@@ -108,7 +110,7 @@ class MLP(nn.Module):
         return x
 
 
-@POSITIONAL_ENCODING.register_module()
+# @POSITIONAL_ENCODING.register_module()
 class SinePositionalEncoding(BaseModule):
     """Position encoding with sine and cosine functions.
     See `End-to-End Object Detection with Transformers
@@ -531,7 +533,7 @@ class Bottleneck(BaseModule):
         return out
 
 
-@TRANSFORMER.register_module()
+# @TRANSFORMER.register_module()
 class PureMSDEnTransformer(BaseModule):
     """
     transformer that only includes an deformable multi-scale encoder
@@ -655,7 +657,7 @@ class PureMSDEnTransformer(BaseModule):
         return memory
 
 
-@TRANSFORMER_LAYER_SEQUENCE.register_module()
+# @TRANSFORMER_LAYER_SEQUENCE.register_module()
 class DetrTransformerEncoder(TransformerLayerSequence):
     """TransformerEncoder of DETR.
     Args:
@@ -681,7 +683,7 @@ class DetrTransformerEncoder(TransformerLayerSequence):
         return x
 
 
-@TRANSFORMER_LAYER.register_module()
+# @TRANSFORMER_LAYER.register_module()
 class PixelTransformerDecoderLayer(BaseModule):
     """Base `TransformerLayer` for vision transformer.
 

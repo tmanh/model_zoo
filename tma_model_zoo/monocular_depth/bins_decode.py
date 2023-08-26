@@ -3,7 +3,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from mmcv.cnn import ConvModule, xavier_init
+from mmengine.model import xavier_init
+
+from mmcv.cnn import ConvModule
 from mmcv.cnn.bricks.transformer import build_positional_encoding
 
 from ..monocular_depth.base_decode import DepthBaseDecodeHead

@@ -2,13 +2,14 @@ import torch
 import torchvision
 import torch.nn as nn
 import torch.nn.functional as functional
+import torchvision.models as tmodels
 
 
 def get_vgg_net(net):  # sourcery skip: raise-specific-error
     if net == 'vgg16':
-        return torchvision.models.vgg16(pretrained=True).features
+        return tmodels.vgg16(weights=tmodels.VGG16_Weights.DEFAULT).features
     elif net == 'vgg19':
-       return torchvision.models.vgg19(pretrained=True).features
+       return tmodels.vgg19(weights=tmodels.VGG19_Weights.DEFAULT).features
     else:
         raise Exception('invalid vgg net')
 

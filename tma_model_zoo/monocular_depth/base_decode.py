@@ -6,7 +6,7 @@ import numpy as np
 import torch.nn as nn
 
 from abc import ABCMeta, abstractmethod
-from mmcv.runner import BaseModule
+from mmengine.model import BaseModule
 
 from ..universal.depthformer_basics import build_loss
 

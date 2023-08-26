@@ -1,10 +1,9 @@
 import os
 import time
-import torch
 import torch.nn as nn
 import torch.nn.functional as functional
 
-from mmcv.runner import load_checkpoint
+from mmengine.runner.checkpoint import load_checkpoint
 
 from ..universal.resnet import Resnet
 from ..enhancement.base import ConvBlock

@@ -1,13 +1,10 @@
 import mmcv
 import torch
 import warnings
-
 import numpy as np
-import torch.distributed as dist
 
-from collections import OrderedDict
 from abc import ABCMeta, abstractmethod
-from mmcv.runner import BaseModule, auto_fp16
+from mmengine.model import BaseModule
 
 
 from ..universal.depthformer_utils import colorize
